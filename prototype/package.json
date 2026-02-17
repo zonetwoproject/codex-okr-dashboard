@@ -1,0 +1,25 @@
+{
+  "name": "okr-dashboard-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OKR Dashboard prototype based on master spec",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node src/server.js",
+    "start:render": "sh -c 'if [ -n \"$DATA_FILE\" ] && [ ! -f \"$DATA_FILE\" ]; then node scripts/seed.js; fi; node src/server.js'",
+    "seed": "node scripts/seed.js",
+    "sync:to-supabase": "node scripts/sync-to-supabase.js",
+    "sync:from-supabase": "node scripts/sync-from-supabase.js",
+    "migrate:remove-kr-metrictype": "node scripts/migrate-remove-kr-metrictype.js",
+    "migrate:remove-initiative-statusscore": "node scripts/migrate-remove-initiative-statusscore.js",
+    "migrate:experiment-single-parent": "node scripts/migrate-experiment-single-parent.js",
+    "migrate:normalize-input-sources": "node scripts/migrate-normalize-input-sources.js",
+    "migrate:status-enums": "node scripts/migrate-status-enums.js",
+    "migrate:experiment-result-enum": "node scripts/migrate-experiment-result-enum.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "express": "^4.21.2"
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: okr-dashboard-prototype
+    runtime: node
+    plan: free
+    rootDir: prototype
+    buildCommand: npm ci
+    startCommand: npm run start:render
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_FILE
+        value: /tmp/okr-dashboard-store.json

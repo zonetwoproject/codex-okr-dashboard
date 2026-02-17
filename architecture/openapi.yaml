@@ -1,0 +1,281 @@
+openapi: 3.0.3
+info:
+  title: OKR Dashboard Prototype API
+  version: 0.1.0
+  description: API draft based on PROJECT_MASTER_SPEC_v1.0
+servers:
+  - url: http://localhost:4000
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+
+  /api/objectives:
+    get:
+      summary: List objectives
+      parameters:
+        - in: query
+          name: half
+          schema: { type: string, enum: [H1, H2] }
+        - in: query
+          name: year
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Objective list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Objective'
+    post:
+      summary: Create objective
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateObjectiveRequest'
+      responses:
+        '201':
+          description: Created
+
+  /api/krs:
+    get:
+      summary: List key results
+      parameters:
+        - in: query
+          name: objectiveId
+          schema: { type: string }
+      responses:
+        '200':
+          description: KR list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KeyResult'
+    post:
+      summary: Create key result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKRRequest'
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Validation error
+
+  /api/experiments:
+    post:
+      summary: Create experiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExperimentRequest'
+      responses:
+        '201':
+          description: Created
+
+  /api/kr-experiment-links:
+    post:
+      summary: Link KR and experiment with weight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKRExperimentLinkRequest'
+      responses:
+        '201':
+          description: Linked
+        '400':
+          description: Validation error
+
+  /api/monthly-performances/upsert:
+    post:
+      summary: Upsert monthly performance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertMonthlyPerformanceRequest'
+      responses:
+        '200':
+          description: Upserted
+
+  /api/dashboard/kr/{krId}:
+    get:
+      summary: KR detail dashboard
+      parameters:
+        - in: path
+          name: krId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: KR dashboard payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KRDashboard'
+
+  /api/audit-logs:
+    get:
+      summary: List audit logs
+      parameters:
+        - in: query
+          name: entityType
+          schema: { type: string }
+        - in: query
+          name: entityId
+          schema: { type: string }
+      responses:
+        '200':
+          description: Audit log list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLog'
+
+components:
+  schemas:
+    Objective:
+      type: object
+      required: [id, half, year, title, teamId]
+      properties:
+        id: { type: string }
+        half: { type: string, enum: [H1, H2] }
+        year: { type: integer }
+        title: { type: string }
+        teamId: { type: string }
+        owner: { type: string }
+
+    CreateObjectiveRequest:
+      type: object
+      required: [half, year, title, teamId, actor, reason]
+      properties:
+        half: { type: string, enum: [H1, H2] }
+        year: { type: integer }
+        title: { type: string }
+        teamId: { type: string }
+        owner: { type: string }
+        actor: { type: string }
+        reason: { type: string }
+
+    KeyResult:
+      type: object
+      required: [id, objectiveId, metricType, unit, targetValue]
+      properties:
+        id: { type: string }
+        objectiveId: { type: string }
+        title: { type: string }
+        metricType: { type: string }
+        unit: { type: string }
+        targetValue: { type: number }
+        signal: { type: string, enum: [green, yellow, red] }
+
+    CreateKRRequest:
+      type: object
+      required: [objectiveId, title, metricType, unit, targetValue, actor, reason]
+      properties:
+        objectiveId: { type: string }
+        title: { type: string }
+        metricType: { type: string }
+        unit: { type: string }
+        targetValue: { type: number }
+        actor: { type: string }
+        reason: { type: string }
+
+    CreateExperimentRequest:
+      type: object
+      required: [title, aarrrTag, actor, reason]
+      properties:
+        title: { type: string }
+        aarrrTag: { type: string, enum: [Acquisition, Activation, Retention, Revenue, Referral] }
+        owner: { type: string }
+        status: { type: string, enum: [planned, running, done] }
+        actor: { type: string }
+        reason: { type: string }
+
+    CreateKRExperimentLinkRequest:
+      type: object
+      required: [krId, experimentId, weight, actor, reason]
+      properties:
+        krId: { type: string }
+        experimentId: { type: string }
+        weight: { type: number, minimum: 0, maximum: 100 }
+        rationale: { type: string }
+        actor: { type: string }
+        reason: { type: string }
+
+    UpsertMonthlyPerformanceRequest:
+      type: object
+      required: [targetType, targetId, yearMonth, actualValue, sourceType, actor, reason]
+      properties:
+        targetType: { type: string, enum: [objective, kr, initiative] }
+        targetId: { type: string }
+        yearMonth: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        actualValue: { type: number }
+        sourceType: { type: string, enum: [manual, synced, calculated] }
+        note: { type: string }
+        actor: { type: string }
+        reason: { type: string }
+
+    KRDashboard:
+      type: object
+      properties:
+        kr:
+          $ref: '#/components/schemas/KeyResult'
+        progress:
+          type: object
+          properties:
+            actualSum: { type: number }
+            achievement: { type: number }
+            signal: { type: string }
+        contributions:
+          type: array
+          items:
+            type: object
+            properties:
+              experimentId: { type: string }
+              experimentTitle: { type: string }
+              weight: { type: number }
+              normalizedWeight: { type: number }
+              contributionScore: { type: number }
+        monthly:
+          type: array
+          items:
+            type: object
+            properties:
+              yearMonth: { type: string }
+              actualValue: { type: number }
+              sourceType: { type: string }
+
+    AuditLog:
+      type: object
+      required: [id, actor, reason, action, entityType, entityId, timestamp]
+      properties:
+        id: { type: string }
+        actor: { type: string }
+        reason: { type: string }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        beforeValue: { type: object, nullable: true }
+        afterValue: { type: object, nullable: true }
+        timestamp: { type: string, format: date-time }

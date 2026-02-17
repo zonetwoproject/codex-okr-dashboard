@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OKR Dashboard Prototype</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="shortcut icon" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="bg-layer"></div>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <p class="brand-eyebrow">Prototype Mark1</p>
+          <h1>OKR Dashboard</h1>
+          <p class="brand-sub">전사 OKR/Input 대시보드</p>
+        </div>
+        <nav id="navTree" class="nav-tree"></nav>
+      </aside>
+
+      <section class="main-pane">
+        <header class="topbar card">
+          <div class="topbar-head">
+            <button id="btnSidebarToggle" class="sidebar-toggle" aria-label="왼쪽 메뉴 접기" aria-expanded="true" title="왼쪽 메뉴 접기">⟨</button>
+            <div class="topbar-title">
+              <h2 id="pageTitle">Dashboard / Executive</h2>
+              <p id="pageDesc">조직 전체 OKR 신호와 리스크를 확인합니다.</p>
+            </div>
+            <div id="topbarActions" class="topbar-actions"></div>
+          </div>
+
+          <div class="search-toolbar">
+            <input id="searchKeyword" type="text" placeholder="검색어 입력 (제목, 설명, 팀, owner 등)" />
+            <button id="btnSearch" class="btn">검색</button>
+          </div>
+
+          <div class="filter-grid">
+            <div>
+              <label for="filterDomain">도메인</label>
+              <select id="filterDomain">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterAarrr">AARRR</label>
+              <select id="filterAarrr">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterDivision">실</label>
+              <select id="filterDivision">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterTeam">팀</label>
+              <select id="filterTeam">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterStatus">상태</label>
+              <select id="filterStatus">
+                <option value="">전체</option>
+                <option value="planned">planned</option>
+                <option value="in_progress">in progress</option>
+                <option value="production_released">production released</option>
+                <option value="spec_out">spec out</option>
+                <option value="dropped">dropped</option>
+                <option value="holding">holding</option>
+                <option value="registered">registered</option>
+                <option value="converted">converted</option>
+                <option value="before_start">before start</option>
+                <option value="winner_selected">winner selected</option>
+                <option value="ended">ended</option>
+                <option value="discarded">discarded</option>
+                <option value="green">🟢 정상</option>
+                <option value="yellow">🟡 주의</option>
+                <option value="red">🔴 위험</option>
+              </select>
+            </div>
+            <div class="filter-actions">
+              <button id="btnApplyFilters" class="btn">필터 적용</button>
+              <button id="btnResetFilters" class="btn icon-btn" aria-label="필터 초기화" title="필터 초기화">↺</button>
+            </div>
+          </div>
+        </header>
+
+        <main id="pageContent" class="content-area"></main>
+      </section>
+    </div>
+
+    <div id="layerModal" class="layer-modal hidden"></div>
+    <div id="toast" class="toast hidden"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>
