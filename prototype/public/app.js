@@ -380,6 +380,23 @@ function optionalNumber(formData, key) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+async function confirmDeleteAndRefresh({ path, label, reason, actor = 'pm.demo', successMessage = '삭제 완료' }) {
+  const targetLabel = String(label || '').trim() || '선택 항목';
+  const confirmed = window.confirm(`"${targetLabel}" 항목을 삭제할까요?`);
+  if (!confirmed) return false;
+  await fetchJSON(path, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      actor,
+      reason: reason || `delete ${targetLabel} from UI`
+    })
+  });
+  showToast(successMessage);
+  await renderCurrentRoute();
+  return true;
+}
+
 function openLayerModal({ title, description, bodyHtml, submitLabel, onSubmit }) {
   if (!el.layerModal) return;
   closeLayerModal();
@@ -1699,6 +1716,7 @@ async function renderKRDetail() {
             <h3>${esc(detail.kr.title)}</h3>
             <p class="panel-desc">KR 달성도, 월 실적, 기여 실험을 관리합니다.</p>
           </div>
+          <button class="btn ghost table-inline-btn" type="button" id="btnDeleteKr">삭제</button>
         </div>
 
         ${krConnectedInfo}
@@ -1886,6 +1904,24 @@ async function renderKRDetail() {
       navigate('/goals/initiatives');
     });
   });
+
+  const btnDeleteKr = document.getElementById('btnDeleteKr');
+  if (btnDeleteKr) {
+    btnDeleteKr.addEventListener('click', async () => {
+      try {
+        const deleted = await confirmDeleteAndRefresh({
+          path: `/api/krs/${encodeURIComponent(detail.kr.id)}`,
+          label: detail.kr.title,
+          reason: 'delete kr from KR detail page'
+        });
+        if (deleted) {
+          state.selectedKrId = null;
+        }
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  }
   bindRouteJumpButtons();
 }
 
@@ -2262,6 +2298,7 @@ async function renderObjectives() {
             <h3>${esc(selectedObjective.title)}</h3>
             <p class="panel-desc">${esc(selectedObjective.definition || 'Objective 설명 없음')}</p>
           </div>
+          <button class="btn ghost table-inline-btn" type="button" id="btnDeleteObjective">삭제</button>
         </div>
 
         ${objectiveConnectedInfo}
@@ -2315,6 +2352,24 @@ async function renderObjectives() {
     });
   });
 
+  const btnDeleteObjective = document.getElementById('btnDeleteObjective');
+  if (btnDeleteObjective) {
+    btnDeleteObjective.addEventListener('click', async () => {
+      try {
+        const deleted = await confirmDeleteAndRefresh({
+          path: `/api/objectives/${encodeURIComponent(selectedObjective.id)}`,
+          label: selectedObjective.title,
+          reason: 'delete objective from objective page'
+        });
+        if (deleted) {
+          state.selectedObjectiveId = null;
+        }
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  }
+
 }
 
 async function renderKRSubKR() {
@@ -2350,7 +2405,7 @@ async function renderKRSubKR() {
       ${krs.length === 0 ? '<div class="empty">KR가 없습니다.</div>' : `
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>KR</th><th>Objective</th><th>소유 범위</th><th>팀</th><th>단위(Unit)</th><th>Target</th><th>Status</th></tr></thead>
+            <thead><tr><th>KR</th><th>Objective</th><th>소유 범위</th><th>팀</th><th>단위(Unit)</th><th>Target</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${krs
                 .map(
@@ -2362,6 +2417,7 @@ async function renderKRSubKR() {
                     <td>${esc(kr.unit || '-')}</td>
                     <td>${fmtNumber(kr.targetValue)}</td>
                     <td>${statusBadge(kr.status)}</td>
+                    <td><button class="btn ghost table-inline-btn" type="button" data-delete-kr="${esc(kr.id)}" data-kr-title="${esc(kr.title)}">삭제</button></td>
                   </tr>`
                 )
                 .join('')}
@@ -2385,7 +2441,7 @@ async function renderKRSubKR() {
       ${subKrs.length === 0 ? '<div class="empty">KR(세부)가 없습니다.</div>' : `
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>KR(세부)</th><th>상위 KR</th><th>소유 범위</th><th>팀</th><th>Target</th><th>Status</th></tr></thead>
+            <thead><tr><th>KR(세부)</th><th>상위 KR</th><th>소유 범위</th><th>팀</th><th>Target</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${subKrs
                 .map(
@@ -2396,6 +2452,7 @@ async function renderKRSubKR() {
                     <td>${esc(item.team || '-')}</td>
                     <td>${fmtNumber(item.targetValue)}</td>
                     <td>${statusBadge(item.status)}</td>
+                    <td><button class="btn ghost table-inline-btn" type="button" data-delete-subkr="${esc(item.id)}" data-subkr-title="${esc(item.title)}">삭제</button></td>
                   </tr>`
                 )
                 .join('')}
@@ -2615,6 +2672,40 @@ async function renderKRSubKR() {
       }
     });
   });
+
+  el.pageContent.querySelectorAll('[data-delete-kr]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const krId = String(button.dataset.deleteKr || '').trim();
+      const krTitle = String(button.dataset.krTitle || '').trim();
+      if (!krId) return;
+      try {
+        await confirmDeleteAndRefresh({
+          path: `/api/krs/${encodeURIComponent(krId)}`,
+          label: krTitle,
+          reason: 'delete kr from KR list page'
+        });
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-delete-subkr]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const subKrId = String(button.dataset.deleteSubkr || '').trim();
+      const subKrTitle = String(button.dataset.subkrTitle || '').trim();
+      if (!subKrId) return;
+      try {
+        await confirmDeleteAndRefresh({
+          path: `/api/sub-krs/${encodeURIComponent(subKrId)}`,
+          label: subKrTitle,
+          reason: 'delete sub-kr from KR list page'
+        });
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  });
 }
 
 async function renderInitiatives() {
@@ -2716,6 +2807,7 @@ async function renderInitiatives() {
             <h3>${esc(selectedInitiative.title)}</h3>
             <p class="panel-desc">${esc(selectedInitiative.definition || 'Initiative 설명 없음')}</p>
           </div>
+          <button class="btn ghost table-inline-btn" type="button" id="btnDeleteInitiative">삭제</button>
         </div>
 
         ${initiativeConnectedInfo}
@@ -2845,6 +2937,24 @@ async function renderInitiatives() {
       }
     });
   });
+
+  const btnDeleteInitiative = document.getElementById('btnDeleteInitiative');
+  if (btnDeleteInitiative) {
+    btnDeleteInitiative.addEventListener('click', async () => {
+      try {
+        const deleted = await confirmDeleteAndRefresh({
+          path: `/api/initiatives/${encodeURIComponent(selectedInitiative.id)}`,
+          label: selectedInitiative.title,
+          reason: 'delete initiative from initiative page'
+        });
+        if (deleted) {
+          state.selectedInitiativeId = null;
+        }
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  }
 }
 
 async function renderInputSources() {
@@ -3201,6 +3311,7 @@ async function renderInputSources() {
                 <th>등록일</th>
                 <th>과제화 여부</th>
                 <th>결정</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -3214,10 +3325,11 @@ async function renderInputSources() {
                     <td>${esc(item.team || '-')}</td>
                     <td>${esc(item.createdAt ? fmtDateTime(item.createdAt).slice(0, 10) : '-')}</td>
                     <td>${inputDecisionBadge(item.status)}</td>
-                      <td>${item.status === 'registered'
+                    <td>${item.status === 'registered'
                         ? `<button class="btn secondary table-inline-btn" type="button" data-input-decide="${esc(item.id)}">과제화 여부 선택</button>`
                         : '-'
-                      }</td>
+                    }</td>
+                    <td><button class="btn ghost table-inline-btn" type="button" data-input-delete="${esc(item.id)}" data-input-title="${esc(item.title)}">삭제</button></td>
                   </tr>`
                 )
                 .join('')}
@@ -3258,6 +3370,23 @@ async function renderInputSources() {
         return;
       }
       openInputDecisionModal(item);
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-input-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const inputSourceId = String(button.dataset.inputDelete || '').trim();
+      const inputTitle = String(button.dataset.inputTitle || '').trim();
+      if (!inputSourceId) return;
+      try {
+        await confirmDeleteAndRefresh({
+          path: `/api/input-sources/${encodeURIComponent(inputSourceId)}`,
+          label: inputTitle,
+          reason: 'delete input source from input page'
+        });
+      } catch (err) {
+        showToast(err.message, true);
+      }
     });
   });
 }
@@ -3983,6 +4112,7 @@ async function renderExperiments() {
                 <th class="exp-col-result">실험 결과</th>
                 <th class="exp-col-owner">담당자</th>
                 <th class="exp-col-parent">상위 목표</th>
+                <th class="exp-col-action"></th>
               </tr>
             </thead>
             <tbody>
@@ -4003,9 +4133,12 @@ async function renderExperiments() {
                           </div>`
                         : '-'}
                     </td>
+                    <td class="exp-col-action">
+                      <button class="btn ghost table-inline-btn" type="button" data-delete-experiment="${esc(row.exp.id)}" data-experiment-title="${esc(row.exp.title)}">삭제</button>
+                    </td>
                   </tr>`
                 )
-                .join('') || '<tr><td colspan="8">실험 없음</td></tr>'}
+                .join('') || '<tr><td colspan="9">실험 없음</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -4078,6 +4211,23 @@ async function renderExperiments() {
       if (targetType === 'initiative') {
         state.selectedInitiativeId = targetId;
         navigate('/goals/initiatives');
+      }
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-delete-experiment]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const experimentId = String(button.dataset.deleteExperiment || '').trim();
+      const experimentTitle = String(button.dataset.experimentTitle || '').trim();
+      if (!experimentId) return;
+      try {
+        await confirmDeleteAndRefresh({
+          path: `/api/experiments/${encodeURIComponent(experimentId)}`,
+          label: experimentTitle,
+          reason: 'delete experiment from experiment list page'
+        });
+      } catch (err) {
+        showToast(err.message, true);
       }
     });
   });
