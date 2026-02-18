@@ -294,7 +294,7 @@ function loadStore() {
   return storeCache;
 }
 
-function persistStore(store) {
+async function persistStore(store) {
   storeCache = store;
   try {
     writeStore(dataFile, store);
@@ -307,14 +307,19 @@ function persistStore(store) {
   }
 
   const snapshot = JSON.parse(JSON.stringify(store));
-  supabaseSyncQueue = supabaseSyncQueue
-    .then(() => saveStoreToSupabase(snapshot))
-    .then(() => {
-      console.log('Synced latest store to Supabase');
-    })
-    .catch((error) => {
-      console.error('[supabase-sync] failed:', error.message);
-    });
+  await saveStoreToSupabase(snapshot);
+  console.log('Synced latest store to Supabase');
+}
+
+async function persistStoreOrFail(res, store) {
+  try {
+    await persistStore(store);
+    return true;
+  } catch (error) {
+    console.error('[persist] failed:', error.message);
+    fail(res, 500, 'failed to sync data');
+    return false;
+  }
 }
 
 async function bootstrapStore() {
@@ -448,18 +453,13 @@ function collectTeamDivisionMapFromStore(store) {
 function getPresetCollections(store) {
   const source = store && store.presets && typeof store.presets === 'object' ? store.presets : {};
   const sourceTeamDivisions = normalizeTeamDivisionMap(source.teamDivisions);
-  const inferredTeamDivisions = collectTeamDivisionMapFromStore(store || {});
   const teams = normalizeStringList(
-    [
-      ...(Array.isArray(source.teams) ? source.teams : []),
-      ...Object.keys(sourceTeamDivisions),
-      ...Object.keys(inferredTeamDivisions)
-    ],
+    [...(Array.isArray(source.teams) ? source.teams : []), ...Object.keys(sourceTeamDivisions)],
     []
   );
   const teamDivisions = {};
   teams.forEach((team) => {
-    const division = sourceTeamDivisions[team] || inferredTeamDivisions[team] || '';
+    const division = sourceTeamDivisions[team] || '';
     if (!division) return;
     teamDivisions[team] = division;
   });
@@ -1686,7 +1686,7 @@ app.get('/api/objectives', (req, res) => {
   res.json(list);
 });
 
-app.post('/api/objectives', (req, res) => {
+app.post('/api/objectives', async (req, res) => {
   const body = req.body || {};
   const store = loadStore();
   const presetCollections = ensurePresetCollectionsOnStore(store);
@@ -1739,7 +1739,7 @@ app.post('/api/objectives', (req, res) => {
     afterValue: objective
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json(objective);
 });
 
@@ -1813,7 +1813,7 @@ app.get('/api/krs', (req, res) => {
   res.json(list.map((item) => ({ ...item, status: normalizeOkrStatus(item.status, 'planned') })));
 });
 
-app.post('/api/krs', (req, res) => {
+app.post('/api/krs', async (req, res) => {
   const body = req.body || {};
   const error = validateKR(body);
   if (error) return fail(res, 400, error);
@@ -1864,11 +1864,11 @@ app.post('/api/krs', (req, res) => {
     afterValue: kr
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json(kr);
 });
 
-app.post('/api/krs/:krId', (req, res) => {
+app.post('/api/krs/:krId', async (req, res) => {
   const store = loadStore();
   const target = store.krs.find((item) => item.id === req.params.krId && !item.deletedAt);
   if (!target) return fail(res, 404, 'kr not found');
@@ -1916,7 +1916,7 @@ app.post('/api/krs/:krId', (req, res) => {
     afterValue: target
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json({ ...target, status: normalizeOkrStatus(target.status, 'planned') });
 });
 
@@ -1967,7 +1967,7 @@ app.get('/api/sub-krs', (req, res) => {
   res.json(list.map((item) => ({ ...item, status: normalizeOkrStatus(item.status, 'planned') })));
 });
 
-app.post('/api/sub-krs', (req, res) => {
+app.post('/api/sub-krs', async (req, res) => {
   const body = req.body || {};
   const error = validateSubKR(body);
   if (error) return fail(res, 400, error);
@@ -2017,7 +2017,7 @@ app.post('/api/sub-krs', (req, res) => {
     afterValue: subKr
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json({ ...subKr, status: normalizeOkrStatus(subKr.status, 'planned') });
 });
 
@@ -2068,7 +2068,7 @@ app.get('/api/initiatives', (req, res) => {
   res.json(list.map((item) => ({ ...item, status: normalizeOkrStatus(item.status, 'planned') })));
 });
 
-app.post('/api/initiatives', (req, res) => {
+app.post('/api/initiatives', async (req, res) => {
   const body = req.body || {};
   const error = validateInitiative(body);
   if (error) return fail(res, 400, error);
@@ -2148,11 +2148,11 @@ app.post('/api/initiatives', (req, res) => {
     afterValue: initiative
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json({ ...initiative, status: normalizeOkrStatus(initiative.status, 'planned') });
 });
 
-app.post('/api/initiatives/:initiativeId', (req, res) => {
+app.post('/api/initiatives/:initiativeId', async (req, res) => {
   const store = loadStore();
   const target = store.initiatives.find((item) => item.id === req.params.initiativeId && !item.deletedAt);
   if (!target) return fail(res, 404, 'initiative not found');
@@ -2188,7 +2188,7 @@ app.post('/api/initiatives/:initiativeId', (req, res) => {
     afterValue: target
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json({ ...target, status: normalizeOkrStatus(target.status, 'planned') });
 });
 
@@ -2239,7 +2239,7 @@ app.get('/api/experiments', (req, res) => {
   );
 });
 
-app.post('/api/experiments', (req, res) => {
+app.post('/api/experiments', async (req, res) => {
   const body = { ...(req.body || {}) };
   if (body.platformExperimentId !== undefined) {
     const platformItem = findExperimentPlatformItem(body.platformExperimentId);
@@ -2292,7 +2292,7 @@ app.post('/api/experiments', (req, res) => {
     afterValue: experiment
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json({
     ...experiment,
     status: normalizeExperimentStatus(experiment.status, 'before_start'),
@@ -2300,7 +2300,7 @@ app.post('/api/experiments', (req, res) => {
   });
 });
 
-app.post('/api/experiments/:experimentId', (req, res) => {
+app.post('/api/experiments/:experimentId', async (req, res) => {
   const body = { ...(req.body || {}) };
   if (!body.actor || !body.reason) {
     return fail(res, 400, 'Missing required fields: actor, reason');
@@ -2381,7 +2381,7 @@ app.post('/api/experiments/:experimentId', (req, res) => {
     afterValue: target
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json({
     ...target,
     status: normalizeExperimentStatus(target.status, 'before_start'),
@@ -2389,7 +2389,7 @@ app.post('/api/experiments/:experimentId', (req, res) => {
   });
 });
 
-app.post('/api/experiments/:experimentId/mappings', (req, res) => {
+app.post('/api/experiments/:experimentId/mappings', async (req, res) => {
   const body = req.body || {};
   if (!body.actor || !body.reason) {
     return fail(res, 400, 'Missing required fields: actor, reason');
@@ -2499,7 +2499,7 @@ app.post('/api/experiments/:experimentId/mappings', (req, res) => {
     }
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json({
     experimentId: experiment.id,
     targetType,
@@ -2516,7 +2516,7 @@ app.get('/api/kr-experiment-links', (req, res) => {
   res.json(list);
 });
 
-app.post('/api/kr-experiment-links', (req, res) => {
+app.post('/api/kr-experiment-links', async (req, res) => {
   const body = req.body || {};
   const error = validateKRExperimentLink(body);
   if (error) return fail(res, 400, error);
@@ -2572,7 +2572,7 @@ app.post('/api/kr-experiment-links', (req, res) => {
     }
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(existing ? 200 : 201).json(link);
 });
 
@@ -2585,7 +2585,7 @@ app.get('/api/initiative-experiment-links', (req, res) => {
   res.json(list);
 });
 
-app.post('/api/initiative-experiment-links', (req, res) => {
+app.post('/api/initiative-experiment-links', async (req, res) => {
   const body = req.body || {};
   const error = validateInitiativeExperimentLink(body);
   if (error) return fail(res, 400, error);
@@ -2634,7 +2634,7 @@ app.post('/api/initiative-experiment-links', (req, res) => {
     }
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(existing ? 200 : 201).json(link);
 });
 
@@ -2653,7 +2653,7 @@ app.get('/api/monthly-performances', (req, res) => {
   res.json(list.sort((a, b) => b.yearMonth.localeCompare(a.yearMonth)));
 });
 
-app.post('/api/monthly-performances/upsert', (req, res) => {
+app.post('/api/monthly-performances/upsert', async (req, res) => {
   const body = req.body || {};
   const error = validateMonthlyUpsert(body);
   if (error) return fail(res, 400, error);
@@ -2692,7 +2692,7 @@ app.post('/api/monthly-performances/upsert', (req, res) => {
       afterValue: existing
     });
 
-    persistStore(store);
+    if (!(await persistStoreOrFail(res, store))) return;
     return res.status(200).json(existing);
   }
 
@@ -2719,7 +2719,7 @@ app.post('/api/monthly-performances/upsert', (req, res) => {
     afterValue: record
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(200).json(record);
 });
 
@@ -2918,7 +2918,7 @@ app.get('/api/dashboard/okr-table', (req, res) => {
   res.json({ rows, pagination, summary });
 });
 
-app.patch('/api/dashboard/okr-table/:rowId', (req, res) => {
+app.patch('/api/dashboard/okr-table/:rowId', async (req, res) => {
   const store = loadStore();
   const found = findEntityByRowId(store, req.params.rowId);
   if (!found) return fail(res, 404, 'row not found');
@@ -2949,13 +2949,13 @@ app.patch('/api/dashboard/okr-table/:rowId', (req, res) => {
     afterValue: updated
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
 
   const row = buildOKRTableRows(store).find((item) => item.rowId === `${found.entityType}:${found.entityId}`) || null;
   res.json({ row });
 });
 
-app.post('/api/dashboard/okr-table/:rowId/monthly-upsert', (req, res) => {
+app.post('/api/dashboard/okr-table/:rowId/monthly-upsert', async (req, res) => {
   const store = loadStore();
   const found = findEntityByRowId(store, req.params.rowId);
   if (!found) return fail(res, 404, 'row not found');
@@ -3027,7 +3027,7 @@ app.post('/api/dashboard/okr-table/:rowId/monthly-upsert', (req, res) => {
     });
   }
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   const updatedRow = buildOKRTableRows(store).find((item) => item.rowId === `${found.entityType}:${found.entityId}`) || null;
   res.json({ row: updatedRow });
 });
@@ -3089,7 +3089,7 @@ app.get('/api/input-sources', (req, res) => {
   res.json(sorted);
 });
 
-app.post('/api/input-sources', (req, res) => {
+app.post('/api/input-sources', async (req, res) => {
   const body = req.body || {};
   const store = loadStore();
   const presetCollections = ensurePresetCollectionsOnStore(store);
@@ -3139,11 +3139,11 @@ app.post('/api/input-sources', (req, res) => {
     afterValue: input
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json(input);
 });
 
-app.post('/api/input-sources/:inputSourceId/process', (req, res) => {
+app.post('/api/input-sources/:inputSourceId/process', async (req, res) => {
   const body = req.body || {};
   const error = validateInputSourceProcess(body);
   if (error) return fail(res, 400, error);
@@ -3217,7 +3217,7 @@ app.post('/api/input-sources/:inputSourceId/process', (req, res) => {
     afterValue: target
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json(target);
 });
 
@@ -3294,7 +3294,7 @@ app.get('/api/admin/presets', (_req, res) => {
   });
 });
 
-app.post('/api/admin/presets', (req, res) => {
+app.post('/api/admin/presets', async (req, res) => {
   const body = req.body || {};
   const presetType = parsePresetType(body.presetType);
   if (!presetType) return fail(res, 400, 'presetType is invalid');
@@ -3347,11 +3347,11 @@ app.post('/api/admin/presets', (req, res) => {
     afterValue: after
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json(after);
 });
 
-app.post('/api/admin/presets/update', (req, res) => {
+app.post('/api/admin/presets/update', async (req, res) => {
   const body = req.body || {};
   const presetType = parsePresetType(body.presetType);
   if (!presetType) return fail(res, 400, 'presetType is invalid');
@@ -3415,11 +3415,11 @@ app.post('/api/admin/presets/update', (req, res) => {
     afterValue: after
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json(after);
 });
 
-app.post('/api/admin/presets/delete', (req, res) => {
+app.post('/api/admin/presets/delete', async (req, res) => {
   const body = req.body || {};
   const presetType = parsePresetType(body.presetType);
   if (!presetType) return fail(res, 400, 'presetType is invalid');
@@ -3478,7 +3478,7 @@ app.post('/api/admin/presets/delete', (req, res) => {
     afterValue: after
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json(after);
 });
 
@@ -3526,7 +3526,7 @@ app.get('/api/decision-logs', (_req, res) => {
   res.json(list);
 });
 
-app.post('/api/decision-logs', (req, res) => {
+app.post('/api/decision-logs', async (req, res) => {
   const body = req.body || {};
   const error = validateDecisionLog(body);
   if (error) return fail(res, 400, error);
@@ -3552,7 +3552,7 @@ app.post('/api/decision-logs', (req, res) => {
     afterValue: log
   });
 
-  persistStore(store);
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json(log);
 });
 
