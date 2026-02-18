@@ -26,8 +26,8 @@ const {
   baseStore,
   loadStoreFromSupabase,
   saveStoreToSupabase,
-  savePresetsToSupabase,
-  appendAuditLogToSupabase
+  appendAuditLogToSupabase,
+  syncStoreMutationToSupabase
 } = require('./supabaseStore');
 
 const app = express();
@@ -302,9 +302,22 @@ async function persistStore(store) {
     return;
   }
 
-  const snapshot = JSON.parse(JSON.stringify(store));
-  await saveStoreToSupabase(snapshot);
-  console.log('Synced latest store to Supabase');
+  const latestAuditLog =
+    Array.isArray(store.auditLogs) && store.auditLogs.length > 0
+      ? store.auditLogs[store.auditLogs.length - 1]
+      : null;
+  if (!latestAuditLog) {
+    const snapshot = JSON.parse(JSON.stringify(store));
+    await saveStoreToSupabase(snapshot);
+    console.log('Synced full store to Supabase');
+    return;
+  }
+
+  const mode = await syncStoreMutationToSupabase(store, latestAuditLog);
+  if (mode !== 'full') {
+    await appendAuditLogToSupabase(latestAuditLog);
+  }
+  console.log(`Synced store mutation to Supabase (${mode})`);
 }
 
 async function persistStoreOrFail(res, store) {
@@ -313,30 +326,6 @@ async function persistStoreOrFail(res, store) {
     return true;
   } catch (error) {
     console.error('[persist] failed:', error.message);
-    fail(res, 500, 'failed to sync data');
-    return false;
-  }
-}
-
-async function persistPresetStore(store, latestAuditLog) {
-  storeCache = store;
-  try {
-    writeStore(dataFile, store);
-  } catch (error) {
-    console.error('[store-write] failed, keeping in-memory cache only:', error.message);
-  }
-  if (!isSupabaseEnabled()) return;
-  await savePresetsToSupabase(store.presets || {});
-  await appendAuditLogToSupabase(latestAuditLog);
-  console.log('Synced preset slice to Supabase');
-}
-
-async function persistPresetStoreOrFail(res, store, latestAuditLog) {
-  try {
-    await persistPresetStore(store, latestAuditLog);
-    return true;
-  } catch (error) {
-    console.error('[persist-preset] failed:', error.message);
     fail(res, 500, 'failed to sync data');
     return false;
   }
@@ -3359,8 +3348,7 @@ app.post('/api/admin/presets', async (req, res) => {
     afterValue: after
   });
 
-  const latestAuditLog = store.auditLogs[store.auditLogs.length - 1] || null;
-  if (!(await persistPresetStoreOrFail(res, store, latestAuditLog))) return;
+  if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json(after);
 });
 
@@ -3428,8 +3416,7 @@ app.post('/api/admin/presets/update', async (req, res) => {
     afterValue: after
   });
 
-  const latestAuditLog = store.auditLogs[store.auditLogs.length - 1] || null;
-  if (!(await persistPresetStoreOrFail(res, store, latestAuditLog))) return;
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json(after);
 });
 
@@ -3492,8 +3479,7 @@ app.post('/api/admin/presets/delete', async (req, res) => {
     afterValue: after
   });
 
-  const latestAuditLog = store.auditLogs[store.auditLogs.length - 1] || null;
-  if (!(await persistPresetStoreOrFail(res, store, latestAuditLog))) return;
+  if (!(await persistStoreOrFail(res, store))) return;
   res.json(after);
 });
 

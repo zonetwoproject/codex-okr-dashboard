@@ -107,6 +107,16 @@ async function insertInBatches(table, rows, batchSize = 500) {
   }
 }
 
+async function upsertInBatches(table, rows, onConflict = 'id', batchSize = 500) {
+  if (!rows.length) return;
+  const client = getClient();
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const chunk = rows.slice(i, i + batchSize);
+    const { error } = await client.from(table).upsert(chunk, { onConflict });
+    if (error) throw new Error(`${table} upsert failed: ${error.message}`);
+  }
+}
+
 function mapObjectivesFromDb(rows) {
   return rows.map((x) => ({
     id: x.id,
@@ -679,11 +689,105 @@ async function appendAuditLogToSupabase(log) {
   await insertInBatches('audit_logs', mapAuditLogsToDb([log]));
 }
 
+function findById(rows, id) {
+  return (rows || []).find((item) => item.id === id) || null;
+}
+
+async function syncExperimentMappingsForExperiment(store, experimentId) {
+  const client = getClient();
+  const { error: delKrError } = await client
+    .from('kr_experiment_links')
+    .delete()
+    .eq('experiment_id', experimentId);
+  if (delKrError) throw new Error(`kr_experiment_links delete failed: ${delKrError.message}`);
+
+  const { error: delInitError } = await client
+    .from('initiative_experiment_links')
+    .delete()
+    .eq('experiment_id', experimentId);
+  if (delInitError) throw new Error(`initiative_experiment_links delete failed: ${delInitError.message}`);
+
+  const krRows = mapKrExperimentLinksToDb((store.krExperimentLinks || []).filter((x) => x.experimentId === experimentId));
+  const initRows = mapInitiativeExperimentLinksToDb(
+    (store.initiativeExperimentLinks || []).filter((x) => x.experimentId === experimentId)
+  );
+  await insertInBatches('kr_experiment_links', krRows);
+  await insertInBatches('initiative_experiment_links', initRows);
+}
+
+async function syncStoreMutationToSupabase(store, auditLog) {
+  if (!enabled || !auditLog) return 'none';
+  const entityType = String(auditLog.entityType || '').trim();
+  const entityId = String(auditLog.entityId || '').trim();
+
+  if (entityType === 'preset') {
+    await savePresetsToSupabase(store.presets || {});
+    return 'delta';
+  }
+  if (entityType === 'experiment_mappings') {
+    await syncExperimentMappingsForExperiment(store, entityId);
+    return 'delta';
+  }
+  if (entityType === 'monthly_performance') {
+    const row = findById(store.monthlyPerformances, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('monthly_performances', mapMonthlyPerformancesToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'objective') {
+    const row = findById(store.objectives, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('objectives', mapObjectivesToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'kr') {
+    const row = findById(store.krs, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('krs', mapKrsToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'sub_kr') {
+    const row = findById(store.subKrs, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('sub_krs', mapSubKrsToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'initiative') {
+    const row = findById(store.initiatives, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('initiatives', mapInitiativesToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'experiment') {
+    const row = findById(store.experiments, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('experiments', mapExperimentsToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'input_source') {
+    const row = findById(store.inputSources, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('input_sources', mapInputSourcesToDb([row]));
+    return 'delta';
+  }
+  if (entityType === 'decision_log') {
+    const row = findById(store.decisionLogs, entityId);
+    if (!row) return 'delta';
+    await upsertInBatches('decision_logs', mapDecisionLogsToDb([row]));
+    return 'delta';
+  }
+
+  // Unknown mutation type: keep durability over optimization.
+  await saveStoreToSupabase(store);
+  return 'full';
+}
+
 module.exports = {
   isEnabled,
   baseStore,
   loadStoreFromSupabase,
   saveStoreToSupabase,
   savePresetsToSupabase,
-  appendAuditLogToSupabase
+  appendAuditLogToSupabase,
+  syncStoreMutationToSupabase
 };
