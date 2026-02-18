@@ -6,8 +6,7 @@ const {
   addAuditLog,
   computeKRDashboard,
   id,
-  nowIso,
-  DEFAULT_PRESETS
+  nowIso
 } = require('./store');
 const {
   validateObjective,
@@ -88,11 +87,6 @@ const LEGACY_EXPERIMENT_RESULT_MAP = {
   '위너 선전 전': '위너 선정 전'
 };
 const EXPERIMENT_RESULT_HINT = 'result must be 대조군(A) 위너 선정|실험군(B) 위너 선정|위너 선정 전';
-const DEFAULT_DOMAIN_OPTIONS = [...(DEFAULT_PRESETS.domains || [])];
-const DEFAULT_DIVISION_OPTIONS = [...(DEFAULT_PRESETS.divisions || [])];
-const DEFAULT_INPUT_CLASSIFICATIONS = [...(DEFAULT_PRESETS.inputClassifications || [])];
-const DEFAULT_INPUT_PRODUCT_OPTIONS = [...(DEFAULT_PRESETS.inputProducts || [])];
-const DEFAULT_INPUT_SOURCE_OPTIONS = [...(DEFAULT_PRESETS.inputSources || [])];
 const CLASSIFICATION_OPTIONS = ['실 O', '실 KR', '팀 O', '팀 KR', '팀 Initiative'];
 const LEGACY_CLASSIFICATION_MAP = {
   Initiative: '팀 Initiative'
@@ -464,13 +458,13 @@ function getPresetCollections(store) {
     teamDivisions[team] = division;
   });
   return {
-    domains: normalizeStringList(source.domains, DEFAULT_DOMAIN_OPTIONS),
-    divisions: normalizeStringList(source.divisions, DEFAULT_DIVISION_OPTIONS),
+    domains: normalizeStringList(source.domains, []),
+    divisions: normalizeStringList(source.divisions, []),
     teams,
     teamDivisions,
-    inputClassifications: normalizeStringList(source.inputClassifications, DEFAULT_INPUT_CLASSIFICATIONS),
-    inputProducts: normalizeStringList(source.inputProducts, DEFAULT_INPUT_PRODUCT_OPTIONS),
-    inputSources: normalizeStringList(source.inputSources, DEFAULT_INPUT_SOURCE_OPTIONS)
+    inputClassifications: normalizeStringList(source.inputClassifications, []),
+    inputProducts: normalizeStringList(source.inputProducts, []),
+    inputSources: normalizeStringList(source.inputSources, [])
   };
 }
 
@@ -574,24 +568,16 @@ function inferDivisionByTeam(store, teamName) {
 
 function buildTaxonomyPayload(store) {
   const presetCollections = getPresetCollections(store);
-  const extras = collectTaxonomyExtras(store);
-  const mergedTeams = mergePreferredWithExtras(presetCollections.teams, extras.teams);
-  const teamDivisions = {};
-  mergedTeams.forEach((team) => {
-    const division = String(presetCollections.teamDivisions?.[team] || extras.teamDivisions?.[team] || '').trim();
-    if (!division) return;
-    teamDivisions[team] = division;
-  });
   return {
-    divisions: mergePreferredWithExtras(presetCollections.divisions, extras.divisions),
-    domains: mergePreferredWithExtras(presetCollections.domains, extras.domains),
+    divisions: [...presetCollections.divisions],
+    domains: [...presetCollections.domains],
     aarrrStages: AARRR_STAGES,
     classifications: CLASSIFICATION_OPTIONS,
     inputClassifications: [...presetCollections.inputClassifications],
     inputProducts: [...presetCollections.inputProducts],
     inputSources: [...presetCollections.inputSources],
-    teams: mergedTeams,
-    teamDivisions
+    teams: [...presetCollections.teams],
+    teamDivisions: { ...presetCollections.teamDivisions }
   };
 }
 
@@ -829,7 +815,7 @@ function normalizeInputClassification(value, presetCollections) {
   if (!raw) return null;
   const options = normalizeStringList(
     presetCollections?.inputClassifications,
-    DEFAULT_INPUT_CLASSIFICATIONS
+    []
   );
   if (options.includes(raw)) return raw;
   return null;
@@ -839,7 +825,7 @@ function normalizeInputProduct(value, presetCollections) {
   const raw = String(value || '').trim();
   const options = normalizeStringList(
     presetCollections?.inputProducts,
-    DEFAULT_INPUT_PRODUCT_OPTIONS
+    []
   );
   if (options.includes(raw)) return raw;
   return null;
@@ -848,7 +834,7 @@ function normalizeInputProduct(value, presetCollections) {
 function normalizeInputSourceRecord(item, presetCollections) {
   const classificationOptions = normalizeStringList(
     presetCollections?.inputClassifications,
-    DEFAULT_INPUT_CLASSIFICATIONS
+    []
   );
   const priorityBasedClassification =
     item.priority === '상'
@@ -875,22 +861,22 @@ function normalizeInputSourceRecord(item, presetCollections) {
       }
     }
   }
-  if (!classification) classification = classificationOptions[0] || 'Needs';
+  if (!classification) classification = classificationOptions[0] || '';
 
   const mappedProduct = normalizeInputProduct(item.product, presetCollections)
     || normalizeInputProduct(item.domain, presetCollections)
     || normalizeInputProduct(item.division, presetCollections);
-  const fallbackProducts = normalizeStringList(presetCollections?.inputProducts, DEFAULT_INPUT_PRODUCT_OPTIONS);
-  const defaultProduct = fallbackProducts[0] || 'Core';
+  const fallbackProducts = normalizeStringList(presetCollections?.inputProducts, []);
+  const defaultProduct = fallbackProducts[0] || '';
   const product =
     mappedProduct ||
     (String(item.domain || '').trim() === 'Food + QC' ? 'Food'
       : String(item.domain || '').trim() === 'Rider' ? 'Delivery'
-      : String(item.domain || '').trim() === 'Partner' ? 'Core'
+      : String(item.domain || '').trim() === 'Partner' ? ''
       : defaultProduct);
 
-  const sourceOptions = normalizeStringList(presetCollections?.inputSources, DEFAULT_INPUT_SOURCE_OPTIONS);
-  const defaultSource = sourceOptions[0] || 'Team';
+  const sourceOptions = normalizeStringList(presetCollections?.inputSources, []);
+  const defaultSource = sourceOptions[0] || '';
   const sourceRaw = String(item.source || '').trim();
   const source = sourceOptions.includes(sourceRaw) ? sourceRaw : defaultSource;
 
