@@ -1801,10 +1801,10 @@ app.delete('/api/objectives/:objectiveId', async (req, res) => {
   if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
 
   if (store.krs.some((item) => item.objectiveId === objective.id && !item.deletedAt)) {
-    return fail(res, 409, 'objective has active krs');
+    return fail(res, 409, '연결된 KR가 있어 Objective를 삭제할 수 없습니다. KR를 먼저 삭제해 주세요.');
   }
   if (store.initiatives.some((item) => item.objectiveId === objective.id && !item.deletedAt)) {
-    return fail(res, 409, 'objective has active initiatives');
+    return fail(res, 409, '연결된 Initiative가 있어 Objective를 삭제할 수 없습니다. Initiative를 먼저 삭제해 주세요.');
   }
 
   const before = { ...objective };
@@ -2012,13 +2012,13 @@ app.delete('/api/krs/:krId', async (req, res) => {
   if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
 
   if (store.subKrs.some((item) => item.krId === target.id && !item.deletedAt)) {
-    return fail(res, 409, 'kr has active sub-krs');
+    return fail(res, 409, '연결된 Sub-KR가 있어 KR를 삭제할 수 없습니다. Sub-KR를 먼저 삭제해 주세요.');
   }
   if (store.initiatives.some((item) => item.krId === target.id && !item.deletedAt)) {
-    return fail(res, 409, 'kr has active initiatives');
+    return fail(res, 409, '연결된 Initiative가 있어 KR를 삭제할 수 없습니다. Initiative를 먼저 삭제해 주세요.');
   }
   if (store.krExperimentLinks.some((item) => item.krId === target.id)) {
-    return fail(res, 409, 'kr has experiment links');
+    return fail(res, 409, '연결된 Experiment 매핑이 있어 KR를 삭제할 수 없습니다. 매핑을 먼저 해제해 주세요.');
   }
 
   const before = { ...target };
@@ -2201,7 +2201,7 @@ app.delete('/api/sub-krs/:subKrId', async (req, res) => {
   if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
 
   if (store.initiatives.some((item) => item.subKrId === target.id && !item.deletedAt)) {
-    return fail(res, 409, 'sub_kr has active initiatives');
+    return fail(res, 409, '연결된 Initiative가 있어 Sub-KR를 삭제할 수 없습니다. Initiative를 먼저 삭제해 주세요.');
   }
 
   const before = { ...target };
@@ -2403,7 +2403,7 @@ app.delete('/api/initiatives/:initiativeId', async (req, res) => {
   if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
 
   if (store.initiativeExperimentLinks.some((item) => item.initiativeId === target.id)) {
-    return fail(res, 409, 'initiative has experiment links');
+    return fail(res, 409, '연결된 Experiment 매핑이 있어 Initiative를 삭제할 수 없습니다. 매핑을 먼저 해제해 주세요.');
   }
 
   const before = { ...target };
@@ -2631,10 +2631,10 @@ app.delete('/api/experiments/:experimentId', async (req, res) => {
   if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
 
   if (store.krExperimentLinks.some((item) => item.experimentId === target.id)) {
-    return fail(res, 409, 'experiment has kr links');
+    return fail(res, 409, 'KR와 연결된 매핑이 있어 Experiment를 삭제할 수 없습니다. KR 매핑을 먼저 해제해 주세요.');
   }
   if (store.initiativeExperimentLinks.some((item) => item.experimentId === target.id)) {
-    return fail(res, 409, 'experiment has initiative links');
+    return fail(res, 409, 'Initiative와 연결된 매핑이 있어 Experiment를 삭제할 수 없습니다. Initiative 매핑을 먼저 해제해 주세요.');
   }
 
   const before = { ...target };
