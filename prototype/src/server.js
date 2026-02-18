@@ -3610,10 +3610,25 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-bootstrapStore().finally(() => {
-  app.listen(port, () => {
-    console.log(`OKR dashboard prototype server listening on port ${port}`);
-    console.log(`Data file: ${dataFile}`);
-    console.log(`Supabase sync: ${isSupabaseEnabled() ? 'enabled' : 'disabled'}`);
-  });
-});
+const bootstrapReady = bootstrapStore();
+
+if (require.main === module) {
+  bootstrapReady
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`OKR dashboard prototype server listening on port ${port}`);
+        console.log(`Data file: ${dataFile}`);
+        console.log(`Supabase sync: ${isSupabaseEnabled() ? 'enabled' : 'disabled'}`);
+      });
+    })
+    .catch((error) => {
+      console.error('[bootstrap] failed:', error.message);
+      process.exit(1);
+    });
+}
+
+module.exports = {
+  app,
+  bootstrapReady,
+  bootstrapStore
+};

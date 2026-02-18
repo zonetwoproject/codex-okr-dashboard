@@ -65,6 +65,27 @@ git push origin main
 - 15분 유휴 시 서비스가 잠들 수 있으며, 다음 첫 요청이 느릴 수 있습니다.
 - Free 플랜은 Persistent Disk를 지원하지 않아 데이터 영속성이 보장되지 않습니다.
 
+## Vercel Hobby 전환 (무료)
+
+Vercel Hobby로도 동작하도록 현재 프로토타입을 정리했습니다.
+
+- 라우팅: 모든 요청을 `api/index.js` 서버리스 핸들러로 전달(`vercel.json`의 rewrite 사용)
+- 정적 자산/SPA 라우팅: 기존 `public/`을 Express에서 그대로 제공
+- Render 전용 `DATA_FILE` 설정은 제거하고, 운영에서는 Supabase 연결을 권장합니다.
+
+### Vercel 배포 절차
+1. `prototype/` 디렉터리 기준으로 GitHub 저장소를 Vercel에 연결
+2. Framework preset: **Other** (또는 **Node**)
+3. Environment Variables에 다음 값 설정
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `NODE_ENV=production`
+4. Deploy
+
+### Vercel Hobby 운영 포인트
+- Hobby는 무료이나 요청이 간헐적인 경우 콜드 스타트 지연이 있을 수 있습니다.
+- 데이터 유실 방지를 위해 JSON 파일 기반 운영 대신 Supabase를 사용하는 것을 권장합니다.
+
 ## Supabase 정규화 테이블로 분리하기
 현재 앱 런타임은 JSON 파일 기반이지만, 아래 절차로 Supabase에 정규화된 테이블을 만들고 데이터를 이관할 수 있습니다.
 

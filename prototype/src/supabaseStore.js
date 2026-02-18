@@ -322,18 +322,24 @@ function mapAuditLogsFromDb(rows) {
 
 function buildPresetObject(presetRows, teamDivisionRows) {
   const grouped = {
-    divisions: [],
-    domains: [],
-    teams: [],
-    inputClassifications: [],
-    inputProducts: [],
-    inputSources: []
+    divisions: [...(DEFAULT_PRESETS.divisions || [])],
+    domains: [...(DEFAULT_PRESETS.domains || [])],
+    teams: [...(DEFAULT_PRESETS.teams || [])],
+    inputClassifications: [...(DEFAULT_PRESETS.inputClassifications || [])],
+    inputProducts: [...(DEFAULT_PRESETS.inputProducts || [])],
+    inputSources: [...(DEFAULT_PRESETS.inputSources || [])]
   };
+  const hasPresetTypeRows = {};
 
   presetRows
     .sort((a, b) => a.preset_type.localeCompare(b.preset_type) || a.position - b.position)
     .forEach((row) => {
-      if (Array.isArray(grouped[row.preset_type])) grouped[row.preset_type].push(row.value);
+      if (!Array.isArray(grouped[row.preset_type])) return;
+      if (!hasPresetTypeRows[row.preset_type]) {
+        grouped[row.preset_type] = [];
+        hasPresetTypeRows[row.preset_type] = true;
+      }
+      grouped[row.preset_type].push(row.value);
     });
 
   const teamDivisions = {};
