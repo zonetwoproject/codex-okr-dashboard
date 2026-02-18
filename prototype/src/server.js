@@ -1744,6 +1744,40 @@ app.post('/api/objectives', async (req, res) => {
   res.status(201).json(objective);
 });
 
+app.delete('/api/objectives/:objectiveId', async (req, res) => {
+  const store = loadStore();
+  const objective = store.objectives.find((item) => item.id === req.params.objectiveId && !item.deletedAt);
+  if (!objective) return fail(res, 404, 'objective not found');
+
+  const actor = String(req.body?.actor || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
+
+  if (store.krs.some((item) => item.objectiveId === objective.id && !item.deletedAt)) {
+    return fail(res, 409, 'objective has active krs');
+  }
+  if (store.initiatives.some((item) => item.objectiveId === objective.id && !item.deletedAt)) {
+    return fail(res, 409, 'objective has active initiatives');
+  }
+
+  const before = { ...objective };
+  objective.deletedAt = nowIso();
+  objective.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor,
+    reason,
+    action: 'delete',
+    entityType: 'objective',
+    entityId: objective.id,
+    beforeValue: before,
+    afterValue: objective
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ id: objective.id, deleted: true });
+});
+
 app.get('/api/objectives/:objectiveId/krs', (req, res) => {
   const store = loadStore();
   const list = store.krs.filter((kr) => !kr.deletedAt && kr.objectiveId === req.params.objectiveId);
@@ -1921,6 +1955,43 @@ app.post('/api/krs/:krId', async (req, res) => {
   res.json({ ...target, status: normalizeOkrStatus(target.status, 'planned') });
 });
 
+app.delete('/api/krs/:krId', async (req, res) => {
+  const store = loadStore();
+  const target = store.krs.find((item) => item.id === req.params.krId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'kr not found');
+
+  const actor = String(req.body?.actor || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
+
+  if (store.subKrs.some((item) => item.krId === target.id && !item.deletedAt)) {
+    return fail(res, 409, 'kr has active sub-krs');
+  }
+  if (store.initiatives.some((item) => item.krId === target.id && !item.deletedAt)) {
+    return fail(res, 409, 'kr has active initiatives');
+  }
+  if (store.krExperimentLinks.some((item) => item.krId === target.id)) {
+    return fail(res, 409, 'kr has experiment links');
+  }
+
+  const before = { ...target };
+  target.deletedAt = nowIso();
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor,
+    reason,
+    action: 'delete',
+    entityType: 'kr',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ id: target.id, deleted: true });
+});
+
 app.get('/api/sub-krs', (req, res) => {
   const store = loadStore();
   let list = store.subKrs.filter((item) => !item.deletedAt);
@@ -2020,6 +2091,37 @@ app.post('/api/sub-krs', async (req, res) => {
 
   if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json({ ...subKr, status: normalizeOkrStatus(subKr.status, 'planned') });
+});
+
+app.delete('/api/sub-krs/:subKrId', async (req, res) => {
+  const store = loadStore();
+  const target = store.subKrs.find((item) => item.id === req.params.subKrId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'sub_kr not found');
+
+  const actor = String(req.body?.actor || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
+
+  if (store.initiatives.some((item) => item.subKrId === target.id && !item.deletedAt)) {
+    return fail(res, 409, 'sub_kr has active initiatives');
+  }
+
+  const before = { ...target };
+  target.deletedAt = nowIso();
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor,
+    reason,
+    action: 'delete',
+    entityType: 'sub_kr',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ id: target.id, deleted: true });
 });
 
 app.get('/api/initiatives', (req, res) => {
@@ -2191,6 +2293,37 @@ app.post('/api/initiatives/:initiativeId', async (req, res) => {
 
   if (!(await persistStoreOrFail(res, store))) return;
   res.json({ ...target, status: normalizeOkrStatus(target.status, 'planned') });
+});
+
+app.delete('/api/initiatives/:initiativeId', async (req, res) => {
+  const store = loadStore();
+  const target = store.initiatives.find((item) => item.id === req.params.initiativeId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'initiative not found');
+
+  const actor = String(req.body?.actor || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
+
+  if (store.initiativeExperimentLinks.some((item) => item.initiativeId === target.id)) {
+    return fail(res, 409, 'initiative has experiment links');
+  }
+
+  const before = { ...target };
+  target.deletedAt = nowIso();
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor,
+    reason,
+    action: 'delete',
+    entityType: 'initiative',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ id: target.id, deleted: true });
 });
 
 app.get('/api/experiment-platform/experiments', (req, res) => {
@@ -2388,6 +2521,40 @@ app.post('/api/experiments/:experimentId', async (req, res) => {
     status: normalizeExperimentStatus(target.status, 'before_start'),
     result: normalizeExperimentResult(target.result, '위너 선정 전')
   });
+});
+
+app.delete('/api/experiments/:experimentId', async (req, res) => {
+  const store = loadStore();
+  const target = store.experiments.find((item) => item.id === req.params.experimentId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'experiment not found');
+
+  const actor = String(req.body?.actor || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
+
+  if (store.krExperimentLinks.some((item) => item.experimentId === target.id)) {
+    return fail(res, 409, 'experiment has kr links');
+  }
+  if (store.initiativeExperimentLinks.some((item) => item.experimentId === target.id)) {
+    return fail(res, 409, 'experiment has initiative links');
+  }
+
+  const before = { ...target };
+  target.deletedAt = nowIso();
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor,
+    reason,
+    action: 'delete',
+    entityType: 'experiment',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ id: target.id, deleted: true });
 });
 
 app.post('/api/experiments/:experimentId/mappings', async (req, res) => {
@@ -3220,6 +3387,33 @@ app.post('/api/input-sources/:inputSourceId/process', async (req, res) => {
 
   if (!(await persistStoreOrFail(res, store))) return;
   res.json(target);
+});
+
+app.delete('/api/input-sources/:inputSourceId', async (req, res) => {
+  const store = loadStore();
+  const target = (store.inputSources || []).find((item) => item.id === req.params.inputSourceId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'input source not found');
+
+  const actor = String(req.body?.actor || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!actor || !reason) return fail(res, 400, 'actor and reason are required');
+
+  const before = { ...target };
+  target.deletedAt = nowIso();
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor,
+    reason,
+    action: 'delete',
+    entityType: 'input_source',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ id: target.id, deleted: true });
 });
 
 app.get('/api/input-sources/summary', (req, res) => {

@@ -883,86 +883,79 @@ async function syncStoreMutationToSupabase(store, auditLog) {
     return 'delta';
   }
   if (entityType === 'objective') {
-    const row = findById(store.objectives, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('objectives').delete().eq('id', entityId);
-        if (error) throw new Error(`objectives delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('objectives').delete().eq('id', entityId);
+      if (error) throw new Error(`objectives delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.objectives, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('objectives', mapObjectivesToDb([row]));
     return 'delta';
   }
   if (entityType === 'kr') {
-    const row = findById(store.krs, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('krs').delete().eq('id', entityId);
-        if (error) throw new Error(`krs delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('krs').delete().eq('id', entityId);
+      if (error) throw new Error(`krs delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.krs, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('krs', mapKrsToDb([row]));
     return 'delta';
   }
   if (entityType === 'sub_kr') {
-    const row = findById(store.subKrs, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('sub_krs').delete().eq('id', entityId);
-        if (error) throw new Error(`sub_krs delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('sub_krs').delete().eq('id', entityId);
+      if (error) throw new Error(`sub_krs delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.subKrs, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('sub_krs', mapSubKrsToDb([row]));
     return 'delta';
   }
   if (entityType === 'initiative') {
-    const row = findById(store.initiatives, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('initiatives').delete().eq('id', entityId);
-        if (error) throw new Error(`initiatives delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('initiatives').delete().eq('id', entityId);
+      if (error) throw new Error(`initiatives delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.initiatives, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('initiatives', mapInitiativesToDb([row]));
     return 'delta';
   }
   if (entityType === 'experiment') {
-    const row = findById(store.experiments, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('experiments').delete().eq('id', entityId);
-        if (error) throw new Error(`experiments delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('experiments').delete().eq('id', entityId);
+      if (error) throw new Error(`experiments delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.experiments, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('experiments', mapExperimentsToDb([row]));
     return 'delta';
   }
   if (entityType === 'input_source') {
-    const row = findById(store.inputSources, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('input_sources').delete().eq('id', entityId);
-        if (error) throw new Error(`input_sources delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('input_sources').delete().eq('id', entityId);
+      if (error) throw new Error(`input_sources delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.inputSources, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('input_sources', mapInputSourcesToDb([row]));
     return 'delta';
   }
   if (entityType === 'decision_log') {
-    const row = findById(store.decisionLogs, entityId);
-    if (!row) {
-      if (action.startsWith('delete')) {
-        const { error } = await getClient().from('decision_logs').delete().eq('id', entityId);
-        if (error) throw new Error(`decision_logs delete failed: ${error.message}`);
-      }
+    if (action.startsWith('delete')) {
+      const { error } = await getClient().from('decision_logs').delete().eq('id', entityId);
+      if (error) throw new Error(`decision_logs delete failed: ${error.message}`);
       return 'delta';
     }
+    const row = findById(store.decisionLogs, entityId);
+    if (!row) return 'delta';
     await upsertInBatches('decision_logs', mapDecisionLogsToDb([row]));
     return 'delta';
   }
