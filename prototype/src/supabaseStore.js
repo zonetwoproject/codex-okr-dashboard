@@ -663,9 +663,27 @@ async function saveStoreToSupabase(store) {
   await insertInBatches('preset_team_divisions', teamDivisionRows);
 }
 
+async function savePresetsToSupabase(presets) {
+  if (!enabled) return;
+  const presetRows = buildPresetValues(presets || {});
+  const teamDivisionRows = buildTeamDivisionRows(presets || {});
+
+  await removeAllByPk('preset_team_divisions', 'team');
+  await removeAllByPk('preset_values', 'id');
+  await insertInBatches('preset_values', presetRows);
+  await insertInBatches('preset_team_divisions', teamDivisionRows);
+}
+
+async function appendAuditLogToSupabase(log) {
+  if (!enabled || !log) return;
+  await insertInBatches('audit_logs', mapAuditLogsToDb([log]));
+}
+
 module.exports = {
   isEnabled,
   baseStore,
   loadStoreFromSupabase,
-  saveStoreToSupabase
+  saveStoreToSupabase,
+  savePresetsToSupabase,
+  appendAuditLogToSupabase
 };

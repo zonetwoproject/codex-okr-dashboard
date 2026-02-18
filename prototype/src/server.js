@@ -25,7 +25,9 @@ const {
   isEnabled: isSupabaseEnabled,
   baseStore,
   loadStoreFromSupabase,
-  saveStoreToSupabase
+  saveStoreToSupabase,
+  savePresetsToSupabase,
+  appendAuditLogToSupabase
 } = require('./supabaseStore');
 
 const app = express();
@@ -311,6 +313,30 @@ async function persistStoreOrFail(res, store) {
     return true;
   } catch (error) {
     console.error('[persist] failed:', error.message);
+    fail(res, 500, 'failed to sync data');
+    return false;
+  }
+}
+
+async function persistPresetStore(store, latestAuditLog) {
+  storeCache = store;
+  try {
+    writeStore(dataFile, store);
+  } catch (error) {
+    console.error('[store-write] failed, keeping in-memory cache only:', error.message);
+  }
+  if (!isSupabaseEnabled()) return;
+  await savePresetsToSupabase(store.presets || {});
+  await appendAuditLogToSupabase(latestAuditLog);
+  console.log('Synced preset slice to Supabase');
+}
+
+async function persistPresetStoreOrFail(res, store, latestAuditLog) {
+  try {
+    await persistPresetStore(store, latestAuditLog);
+    return true;
+  } catch (error) {
+    console.error('[persist-preset] failed:', error.message);
     fail(res, 500, 'failed to sync data');
     return false;
   }
@@ -3333,7 +3359,8 @@ app.post('/api/admin/presets', async (req, res) => {
     afterValue: after
   });
 
-  if (!(await persistStoreOrFail(res, store))) return;
+  const latestAuditLog = store.auditLogs[store.auditLogs.length - 1] || null;
+  if (!(await persistPresetStoreOrFail(res, store, latestAuditLog))) return;
   res.status(201).json(after);
 });
 
@@ -3401,7 +3428,8 @@ app.post('/api/admin/presets/update', async (req, res) => {
     afterValue: after
   });
 
-  if (!(await persistStoreOrFail(res, store))) return;
+  const latestAuditLog = store.auditLogs[store.auditLogs.length - 1] || null;
+  if (!(await persistPresetStoreOrFail(res, store, latestAuditLog))) return;
   res.json(after);
 });
 
@@ -3464,7 +3492,8 @@ app.post('/api/admin/presets/delete', async (req, res) => {
     afterValue: after
   });
 
-  if (!(await persistStoreOrFail(res, store))) return;
+  const latestAuditLog = store.auditLogs[store.auditLogs.length - 1] || null;
+  if (!(await persistPresetStoreOrFail(res, store, latestAuditLog))) return;
   res.json(after);
 });
 
