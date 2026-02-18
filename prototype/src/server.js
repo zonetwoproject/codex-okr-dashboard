@@ -24,6 +24,7 @@ const {
 } = require('./validation');
 const {
   isEnabled: isSupabaseEnabled,
+  baseStore,
   loadStoreFromSupabase,
   saveStoreToSupabase
 } = require('./supabaseStore');
@@ -284,13 +285,23 @@ function loadStore() {
   if (storeCache) {
     return storeCache;
   }
-  storeCache = readStore(dataFile);
+  try {
+    storeCache = readStore(dataFile);
+  } catch (error) {
+    console.error('[store-load] failed, fallback to in-memory store:', error.message);
+    storeCache = baseStore();
+  }
   return storeCache;
 }
 
 function persistStore(store) {
   storeCache = store;
-  writeStore(dataFile, store);
+  try {
+    writeStore(dataFile, store);
+  } catch (error) {
+    // Vercel serverless runtime may not allow writes under deployed source paths.
+    console.error('[store-write] failed, keeping in-memory cache only:', error.message);
+  }
   if (!isSupabaseEnabled()) {
     return;
   }
@@ -307,7 +318,13 @@ function persistStore(store) {
 }
 
 async function bootstrapStore() {
-  const localStore = readStore(dataFile);
+  let localStore = null;
+  try {
+    localStore = readStore(dataFile);
+  } catch (error) {
+    console.error('[bootstrap-local] failed, fallback to in-memory store:', error.message);
+    localStore = baseStore();
+  }
   storeCache = localStore;
   if (!isSupabaseEnabled()) {
     return;
@@ -317,7 +334,11 @@ async function bootstrapStore() {
     const remoteStore = await loadStoreFromSupabase();
     if (remoteStore) {
       storeCache = remoteStore;
-      writeStore(dataFile, remoteStore);
+      try {
+        writeStore(dataFile, remoteStore);
+      } catch (error) {
+        console.error('[bootstrap-write] failed, continue with in-memory cache:', error.message);
+      }
       console.log('Loaded initial store from Supabase');
       return;
     }
