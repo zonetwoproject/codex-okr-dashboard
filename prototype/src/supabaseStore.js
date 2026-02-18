@@ -117,6 +117,38 @@ async function upsertInBatches(table, rows, onConflict = 'id', batchSize = 500) 
   }
 }
 
+async function updateOrInsertPresetValue(client, presetType, value, position) {
+  const { data, error } = await client
+    .from('preset_values')
+    .update({ position })
+    .eq('preset_type', presetType)
+    .eq('value', String(value))
+    .select('id');
+  if (error) throw new Error(`preset_values update failed: ${error.message}`);
+  if (Array.isArray(data) && data.length > 0) return;
+  const { error: insertError } = await client.from('preset_values').insert({
+    preset_type: presetType,
+    value: String(value),
+    position
+  });
+  if (insertError) throw new Error(`preset_values insert failed: ${insertError.message}`);
+}
+
+async function updateOrInsertTeamDivision(client, team, division) {
+  const { data, error } = await client
+    .from('preset_team_divisions')
+    .update({ division: String(division) })
+    .eq('team', String(team))
+    .select('team');
+  if (error) throw new Error(`preset_team_divisions update failed: ${error.message}`);
+  if (Array.isArray(data) && data.length > 0) return;
+  const { error: insertError } = await client.from('preset_team_divisions').insert({
+    team: String(team),
+    division: String(division)
+  });
+  if (insertError) throw new Error(`preset_team_divisions insert failed: ${insertError.message}`);
+}
+
 function mapObjectivesFromDb(rows) {
   return rows.map((x) => ({
     id: x.id,
@@ -715,71 +747,227 @@ async function syncExperimentMappingsForExperiment(store, experimentId) {
   await insertInBatches('initiative_experiment_links', initRows);
 }
 
+function parsePresetEntityId(entityId) {
+  const text = String(entityId || '').trim();
+  const idx = text.indexOf(':');
+  if (idx < 1) return { presetType: '', value: '' };
+  return {
+    presetType: text.slice(0, idx),
+    value: text.slice(idx + 1)
+  };
+}
+
+function arrayDiff(before = [], after = []) {
+  const beforeSet = new Set(before.map((x) => String(x)));
+  const afterSet = new Set(after.map((x) => String(x)));
+  return {
+    removed: [...beforeSet].filter((x) => !afterSet.has(x)),
+    added: [...afterSet].filter((x) => !beforeSet.has(x))
+  };
+}
+
+async function syncPresetMutationByDiff(auditLog) {
+  const client = getClient();
+  const action = String(auditLog.action || '').trim();
+  const { presetType } = parsePresetEntityId(auditLog.entityId);
+  const before = (auditLog.beforeValue && typeof auditLog.beforeValue === 'object') ? auditLog.beforeValue : {};
+  const after = (auditLog.afterValue && typeof auditLog.afterValue === 'object') ? auditLog.afterValue : {};
+  const effectiveType = String(after.presetType || before.presetType || presetType || '').trim();
+  if (!effectiveType) throw new Error('preset mutation missing presetType');
+
+  const beforeValues = Array.isArray(before.values) ? before.values.map((x) => String(x)) : [];
+  const afterValues = Array.isArray(after.values) ? after.values.map((x) => String(x)) : [];
+  const { removed } = arrayDiff(beforeValues, afterValues);
+
+  for (const value of removed) {
+    const { error } = await client
+      .from('preset_values')
+      .delete()
+      .eq('preset_type', effectiveType)
+      .eq('value', value);
+    if (error) throw new Error(`preset_values delete failed: ${error.message}`);
+  }
+
+  for (let i = 0; i < afterValues.length; i += 1) {
+    await updateOrInsertPresetValue(client, effectiveType, afterValues[i], i);
+  }
+
+  const beforeMap = (before.teamDivisions && typeof before.teamDivisions === 'object') ? before.teamDivisions : {};
+  const afterMap = (after.teamDivisions && typeof after.teamDivisions === 'object') ? after.teamDivisions : {};
+  const teams = new Set([...Object.keys(beforeMap), ...Object.keys(afterMap)]);
+  for (const team of teams) {
+    const prev = String(beforeMap[team] || '').trim();
+    const next = String(afterMap[team] || '').trim();
+    if (!next && prev) {
+      const { error } = await client.from('preset_team_divisions').delete().eq('team', team);
+      if (error) throw new Error(`preset_team_divisions delete failed: ${error.message}`);
+      continue;
+    }
+    if (next && prev !== next) {
+      await updateOrInsertTeamDivision(client, team, next);
+    }
+  }
+}
+
+async function syncExperimentMappingMutationByDiff(store, auditLog) {
+  const client = getClient();
+  const experimentId = String(auditLog.entityId || '').trim();
+  if (!experimentId) throw new Error('experiment mapping mutation missing entityId');
+  const before = (auditLog.beforeValue && typeof auditLog.beforeValue === 'object') ? auditLog.beforeValue : {};
+  const after = (auditLog.afterValue && typeof auditLog.afterValue === 'object') ? auditLog.afterValue : {};
+  const beforeKr = Array.isArray(before.krIds) ? before.krIds.map((x) => String(x)) : [];
+  const beforeInit = Array.isArray(before.initiativeIds) ? before.initiativeIds.map((x) => String(x)) : [];
+  const targetType = String(after.targetType || '').trim();
+  const targetId = String(after.targetId || '').trim();
+  const nextKr = targetType === 'kr' && targetId ? [targetId] : [];
+  const nextInit = targetType === 'initiative' && targetId ? [targetId] : [];
+
+  const krDiff = arrayDiff(beforeKr, nextKr);
+  const initDiff = arrayDiff(beforeInit, nextInit);
+
+  for (const krId of krDiff.removed) {
+    const { error } = await client
+      .from('kr_experiment_links')
+      .delete()
+      .eq('experiment_id', experimentId)
+      .eq('kr_id', krId);
+    if (error) throw new Error(`kr_experiment_links delete failed: ${error.message}`);
+  }
+  for (const initiativeId of initDiff.removed) {
+    const { error } = await client
+      .from('initiative_experiment_links')
+      .delete()
+      .eq('experiment_id', experimentId)
+      .eq('initiative_id', initiativeId);
+    if (error) throw new Error(`initiative_experiment_links delete failed: ${error.message}`);
+  }
+
+  for (const krId of krDiff.added) {
+    const row = (store.krExperimentLinks || []).find((x) => x.experimentId === experimentId && x.krId === krId);
+    if (!row) continue;
+    await upsertInBatches('kr_experiment_links', mapKrExperimentLinksToDb([row]));
+  }
+  for (const initiativeId of initDiff.added) {
+    const row = (store.initiativeExperimentLinks || []).find(
+      (x) => x.experimentId === experimentId && x.initiativeId === initiativeId
+    );
+    if (!row) continue;
+    await upsertInBatches('initiative_experiment_links', mapInitiativeExperimentLinksToDb([row]));
+  }
+}
+
 async function syncStoreMutationToSupabase(store, auditLog) {
   if (!enabled || !auditLog) return 'none';
   const entityType = String(auditLog.entityType || '').trim();
   const entityId = String(auditLog.entityId || '').trim();
+  const action = String(auditLog.action || '').trim();
 
   if (entityType === 'preset') {
-    await savePresetsToSupabase(store.presets || {});
+    await syncPresetMutationByDiff(auditLog);
     return 'delta';
   }
   if (entityType === 'experiment_mappings') {
-    await syncExperimentMappingsForExperiment(store, entityId);
+    await syncExperimentMappingMutationByDiff(store, auditLog);
     return 'delta';
   }
   if (entityType === 'monthly_performance') {
     const row = findById(store.monthlyPerformances, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('monthly_performances').delete().eq('id', entityId);
+        if (error) throw new Error(`monthly_performances delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('monthly_performances', mapMonthlyPerformancesToDb([row]));
     return 'delta';
   }
   if (entityType === 'objective') {
     const row = findById(store.objectives, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('objectives').delete().eq('id', entityId);
+        if (error) throw new Error(`objectives delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('objectives', mapObjectivesToDb([row]));
     return 'delta';
   }
   if (entityType === 'kr') {
     const row = findById(store.krs, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('krs').delete().eq('id', entityId);
+        if (error) throw new Error(`krs delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('krs', mapKrsToDb([row]));
     return 'delta';
   }
   if (entityType === 'sub_kr') {
     const row = findById(store.subKrs, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('sub_krs').delete().eq('id', entityId);
+        if (error) throw new Error(`sub_krs delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('sub_krs', mapSubKrsToDb([row]));
     return 'delta';
   }
   if (entityType === 'initiative') {
     const row = findById(store.initiatives, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('initiatives').delete().eq('id', entityId);
+        if (error) throw new Error(`initiatives delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('initiatives', mapInitiativesToDb([row]));
     return 'delta';
   }
   if (entityType === 'experiment') {
     const row = findById(store.experiments, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('experiments').delete().eq('id', entityId);
+        if (error) throw new Error(`experiments delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('experiments', mapExperimentsToDb([row]));
     return 'delta';
   }
   if (entityType === 'input_source') {
     const row = findById(store.inputSources, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('input_sources').delete().eq('id', entityId);
+        if (error) throw new Error(`input_sources delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('input_sources', mapInputSourcesToDb([row]));
     return 'delta';
   }
   if (entityType === 'decision_log') {
     const row = findById(store.decisionLogs, entityId);
-    if (!row) return 'delta';
+    if (!row) {
+      if (action.startsWith('delete')) {
+        const { error } = await getClient().from('decision_logs').delete().eq('id', entityId);
+        if (error) throw new Error(`decision_logs delete failed: ${error.message}`);
+      }
+      return 'delta';
+    }
     await upsertInBatches('decision_logs', mapDecisionLogsToDb([row]));
     return 'delta';
   }
 
-  // Unknown mutation type: keep durability over optimization.
-  await saveStoreToSupabase(store);
-  return 'full';
+  throw new Error(`unsupported mutation entityType: ${entityType}`);
 }
 
 module.exports = {
