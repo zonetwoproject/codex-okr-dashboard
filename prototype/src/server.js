@@ -1744,6 +1744,53 @@ app.post('/api/objectives', async (req, res) => {
   res.status(201).json(objective);
 });
 
+app.post('/api/objectives/:objectiveId', async (req, res) => {
+  const store = loadStore();
+  const target = store.objectives.find((item) => item.id === req.params.objectiveId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'objective not found');
+
+  const patch = req.body || {};
+  if (!patch.actor || !patch.reason) {
+    return fail(res, 400, 'actor and reason are required for updates');
+  }
+
+  const before = { ...target };
+  if (patch.half !== undefined) target.half = patch.half;
+  if (patch.year !== undefined) target.year = Number(patch.year);
+  if (patch.title !== undefined) target.title = patch.title;
+  if (patch.definition !== undefined) target.definition = patch.definition;
+  if (patch.division !== undefined) {
+    const divisionValue = String(patch.division || '').trim();
+    target.division = divisionValue;
+    target.teamId = divisionValue;
+  }
+  if (patch.team !== undefined) target.team = patch.team;
+  if (patch.domain !== undefined) target.domain = patch.domain;
+  if (patch.aarrrTag !== undefined) target.aarrrTag = normalizeAarrrTag(patch.aarrrTag);
+  if (patch.baseline !== undefined) target.baseline = Number(patch.baseline);
+  if (patch.q1Target !== undefined) target.q1Target = Number(patch.q1Target);
+  if (patch.q2Target !== undefined) target.q2Target = Number(patch.q2Target);
+  if (patch.owner !== undefined) target.owner = patch.owner;
+  if (patch.status !== undefined) target.status = patch.status;
+  if (patch.classificationOverride !== undefined) target.classificationOverride = patch.classificationOverride;
+  if (patch.startDate !== undefined) target.startDate = patch.startDate;
+  if (patch.endDate !== undefined) target.endDate = patch.endDate;
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor: patch.actor,
+    reason: patch.reason,
+    action: 'update',
+    entityType: 'objective',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json(target);
+});
+
 app.delete('/api/objectives/:objectiveId', async (req, res) => {
   const store = loadStore();
   const objective = store.objectives.find((item) => item.id === req.params.objectiveId && !item.deletedAt);
@@ -2091,6 +2138,57 @@ app.post('/api/sub-krs', async (req, res) => {
 
   if (!(await persistStoreOrFail(res, store))) return;
   res.status(201).json({ ...subKr, status: normalizeOkrStatus(subKr.status, 'planned') });
+});
+
+app.post('/api/sub-krs/:subKrId', async (req, res) => {
+  const store = loadStore();
+  const target = store.subKrs.find((item) => item.id === req.params.subKrId && !item.deletedAt);
+  if (!target) return fail(res, 404, 'sub_kr not found');
+
+  const patch = req.body || {};
+  if (!patch.actor || !patch.reason) {
+    return fail(res, 400, 'actor and reason are required for updates');
+  }
+
+  const before = { ...target };
+  if (patch.title !== undefined) target.title = patch.title;
+  if (patch.definition !== undefined) target.definition = patch.definition;
+  if (patch.targetValue !== undefined) {
+    if (!Number.isFinite(Number(patch.targetValue)) || Number(patch.targetValue) <= 0) {
+      return fail(res, 400, 'targetValue must be a positive number');
+    }
+    target.targetValue = Number(patch.targetValue);
+  }
+  if (patch.status !== undefined) {
+    const parsedStatus = parseOkrStatus(patch.status);
+    if (!parsedStatus) return fail(res, 400, OKR_STATUS_HINT);
+    target.status = parsedStatus;
+  }
+  if (patch.ownerScope !== undefined) target.ownerScope = patch.ownerScope;
+  if (patch.division !== undefined) target.division = patch.division;
+  if (patch.team !== undefined) target.team = patch.team;
+  if (patch.domain !== undefined) target.domain = patch.domain;
+  if (patch.aarrrTag !== undefined) target.aarrrTag = normalizeAarrrTag(patch.aarrrTag);
+  if (patch.baseline !== undefined) target.baseline = Number(patch.baseline);
+  if (patch.q1Target !== undefined) target.q1Target = Number(patch.q1Target);
+  if (patch.q2Target !== undefined) target.q2Target = Number(patch.q2Target);
+  if (patch.classificationOverride !== undefined) target.classificationOverride = patch.classificationOverride;
+  if (patch.startDate !== undefined) target.startDate = patch.startDate;
+  if (patch.endDate !== undefined) target.endDate = patch.endDate;
+  target.updatedAt = nowIso();
+
+  addAuditLog(store, {
+    actor: patch.actor,
+    reason: patch.reason,
+    action: 'update',
+    entityType: 'sub_kr',
+    entityId: target.id,
+    beforeValue: before,
+    afterValue: target
+  });
+
+  if (!(await persistStoreOrFail(res, store))) return;
+  res.json({ ...target, status: normalizeOkrStatus(target.status, 'planned') });
 });
 
 app.delete('/api/sub-krs/:subKrId', async (req, res) => {
