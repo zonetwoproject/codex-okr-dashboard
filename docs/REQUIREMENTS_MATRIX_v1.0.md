@@ -1,7 +1,7 @@
 # OKR Dashboard Requirements Matrix v1.0
 
 작성일: 2026-02-14  
-기준 문서: `/Users/zonetwo/Documents/CODEX-okr-dashboard/PROJECT_MASTER_SPEC_v1.0.md`
+기준 문서: `/Users/jabez/Documents/100. Projects/codex-okr-dashboard/policy-doc.md` (v1.1.0)
 
 ## 1. 목적
 스펙의 핵심 요구사항을 개발 가능한 항목으로 분해하고, 수용 기준(AC)과 검증 방법을 명시한다.

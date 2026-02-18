@@ -7,7 +7,7 @@ OKR Dashboard 정책 문서 v1.1.0
 | 문서 버전 | v1.1.0 |
 | 최종 수정일 | 2026-02-18 |
 | 적용 범위 | `prototype/` 서버/웹 UI 실제 구현 |
-| 통합 상태 | `PROJECT_MASTER_SPEC_v1.0.md` 핵심 내용을 본 문서로 통합함 |
+| 통합 상태 | 기존 Master Spec 핵심 내용을 본 문서(v1.1.0)로 통합 완료함 |
 | 대상 독자 | PM, 운영 어드민, 엔지니어, QA |
 | 기준 코드 | `prototype/src/server.js`, `prototype/src/validation.js`, `prototype/src/supabaseStore.js`, `prototype/public/app.js` |
 
