@@ -3653,8 +3653,6 @@ if (require.main === module) {
     });
 }
 
-module.exports = {
-  app,
-  bootstrapReady,
-  bootstrapStore
-};
+module.exports = app;
+module.exports.bootstrapReady = bootstrapReady;
+module.exports.bootstrapStore = bootstrapStore;

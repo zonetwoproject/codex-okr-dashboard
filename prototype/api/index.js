@@ -1,4 +1,5 @@
-const { app, bootstrapReady } = require('../src/server');
+const app = require('../src/server');
+const { bootstrapReady } = app;
 
 module.exports = async (req, res) => {
   try {
