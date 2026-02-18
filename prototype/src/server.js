@@ -3631,7 +3631,12 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-const bootstrapReady = bootstrapStore();
+const bootstrapReady = bootstrapStore().catch((error) => {
+  console.error('[bootstrap] async init failed, continue with fallback store:', error.message);
+  if (!storeCache) {
+    storeCache = baseStore();
+  }
+});
 
 if (require.main === module) {
   bootstrapReady
