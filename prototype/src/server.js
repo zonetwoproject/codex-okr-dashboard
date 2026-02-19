@@ -35,6 +35,7 @@ const port = Number(process.env.PORT || 4000);
 const dataFile = process.env.DATA_FILE || path.join(__dirname, '../data/store.json');
 let storeCache = null;
 let supabaseSyncQueue = Promise.resolve();
+const appMarkLabel = resolveAppMarkLabel();
 
 const AARRR_STAGES = ['-', 'Acquisition', 'Activation', 'Retention', 'Revenue', 'Referral'];
 const OKR_STATUS_VALUES = new Set([
@@ -275,6 +276,16 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 function fail(res, code, message) {
   res.status(code).json({ error: message });
+}
+
+function resolveAppMarkLabel() {
+  const explicitLabel = String(process.env.APP_MARK_LABEL || '').trim();
+  if (explicitLabel) return explicitLabel;
+
+  const ref = String(process.env.VERCEL_GIT_COMMIT_REF || '').toLowerCase();
+  if (ref === 'main') return 'Mark1';
+  if (ref.includes('mark2')) return 'Mark2';
+  return 'Dev';
 }
 
 function loadStore() {
@@ -1912,7 +1923,13 @@ function updateEntityFromTablePatch(entityType, entity, patchBody) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', now: nowIso() });
+  res.json({
+    status: 'ok',
+    now: nowIso(),
+    appMarkLabel,
+    gitRef: process.env.VERCEL_GIT_COMMIT_REF || null,
+    gitSha: process.env.VERCEL_GIT_COMMIT_SHA || null
+  });
 });
 
 app.get('/api/objectives', (req, res) => {

@@ -112,6 +112,8 @@ const state = {
 const el = {
   appShell: document.querySelector('.app-shell'),
   sidebar: document.querySelector('.sidebar'),
+  brandEyebrow: document.getElementById('brandEyebrow'),
+  brandSub: document.getElementById('brandSub'),
   navTree: document.getElementById('navTree'),
   btnSidebarToggle: document.getElementById('btnSidebarToggle'),
   pageTitle: document.getElementById('pageTitle'),
@@ -354,6 +356,18 @@ async function fetchJSON(path, options) {
     throw new Error(body.error || '요청 실패');
   }
   return body;
+}
+
+function applyAppVersionBadge(health) {
+  const markLabel = String(health?.appMarkLabel || '').trim() || 'Mark1';
+  const gitRef = String(health?.gitRef || '').trim();
+  const versionText = gitRef ? `Prototype ${markLabel} (${gitRef})` : `Prototype ${markLabel}`;
+  if (el.brandEyebrow) {
+    el.brandEyebrow.textContent = versionText;
+  }
+  if (el.brandSub) {
+    el.brandSub.textContent = '전사 OKR/Input 대시보드';
+  }
 }
 
 function showToast(message, isError = false) {
@@ -4626,6 +4640,12 @@ function bindTopbarActions() {
 
 async function bootstrap() {
   state.route = currentRoute();
+  try {
+    const health = await fetchJSON('/api/health');
+    applyAppVersionBadge(health);
+  } catch (_err) {
+    applyAppVersionBadge({});
+  }
   restoreSidebarState();
   await hydrateTaxonomy();
   applyStateToFilterInputs();

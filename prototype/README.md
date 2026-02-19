@@ -80,11 +80,21 @@ Vercel Hobby로도 동작하도록 현재 프로토타입을 정리했습니다.
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `NODE_ENV=production`
+   - `APP_MARK_LABEL=Mark1` (권장, 운영 버전 라벨)
 4. Deploy
 
 ### Vercel Hobby 운영 포인트
 - Hobby는 무료이나 요청이 간헐적인 경우 콜드 스타트 지연이 있을 수 있습니다.
 - 데이터 유실 방지를 위해 JSON 파일 기반 운영 대신 Supabase를 사용하는 것을 권장합니다.
+
+## Mark1/Mark2 운영 방식 (권장)
+- `main` = Mark1 운영 기준선
+- `mark2` = Mark2 개발 브랜치
+- `mark2`는 Vercel Preview URL에서 검증 후 `main`으로 PR 머지
+- 장애 시 Vercel에서 직전 안정 배포를 `Promote`로 롤백
+
+상세 절차 문서:
+- `/Users/jabez/Documents/100. Projects/codex-okr-dashboard/docs/MARK_VERSIONING_GUIDE.md`
 
 ## Supabase 정규화 테이블로 분리하기
 현재 앱 런타임은 JSON 파일 기반이지만, 아래 절차로 Supabase에 정규화된 테이블을 만들고 데이터를 이관할 수 있습니다.
