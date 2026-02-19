@@ -98,9 +98,21 @@ function validateInitiativeExperimentLink(body) {
 function validateMonthlyUpsert(body) {
   const message = required(body, ['targetType', 'targetId', 'yearMonth', 'actualValue', 'actor', 'reason']);
   if (message) return message;
-  if (!TARGET_TYPES.has(body.targetType)) return 'targetType must be objective|kr|initiative';
+  if (!TARGET_TYPES.has(body.targetType)) return 'targetType must be objective|kr|sub_kr|initiative';
   if (body.sourceType !== undefined && !SOURCE_TYPES.has(body.sourceType)) return 'sourceType must be manual|synced|calculated';
   if (!/^\d{4}-\d{2}$/.test(body.yearMonth)) return 'yearMonth must be YYYY-MM';
+  const [yearText, monthText] = String(body.yearMonth).split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || month < 1 || month > 12) {
+    return 'yearMonth must be YYYY-MM';
+  }
+  const today = new Date();
+  const currentYear = today.getUTCFullYear();
+  const currentMonth = today.getUTCMonth() + 1;
+  if (year > currentYear || (year === currentYear && month > currentMonth)) {
+    return 'yearMonth cannot be in the future';
+  }
   if (!Number.isFinite(Number(body.actualValue))) return 'actualValue must be a number';
   return null;
 }

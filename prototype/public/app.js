@@ -49,6 +49,11 @@ const ROUTES = {
     desc: 'OKR/인풋 프리셋을 등록, 수정, 삭제합니다.',
     render: renderAdminPresets
   },
+  '/admin/notifications': {
+    title: 'Notifications',
+    desc: 'KR/Sub-KR/Initiative 실적 알림을 월 단위로 확인합니다.',
+    render: renderAdminNotifications
+  },
   '/admin/logs': {
     title: '관리 / Audit Logs',
     desc: 'Decision Logs와 Audit Logs를 통합 조회합니다.',
@@ -71,7 +76,7 @@ const MENU = [
   },
   {
     group: '관리',
-    routes: ['/admin/presets', '/admin/logs']
+    routes: ['/admin/presets', '/admin/notifications', '/admin/logs']
   }
 ];
 
@@ -1103,12 +1108,24 @@ function openMonthlyUpdateModal({
   valuePlaceholder,
   min,
   max,
+  defaultYearMonth,
+  defaultValue,
+  isEdit = false,
   step = '0.01',
   successMessage,
   afterUpsert
 }) {
+  const now = new Date();
+  const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   const minAttr = min !== undefined ? `min="${esc(min)}"` : '';
   const maxAttr = max !== undefined ? `max="${esc(max)}"` : '';
+  const yearMonthValue = /^\d{4}-\d{2}$/.test(String(defaultYearMonth || '').trim())
+    ? String(defaultYearMonth).trim()
+    : '';
+  const yearMonthValueAttr = yearMonthValue ? `value="${esc(yearMonthValue)}"` : '';
+  const valueValue = Number.isFinite(Number(defaultValue)) ? String(Number(defaultValue)) : '';
+  const valueValueAttr = valueValue ? `value="${esc(valueValue)}"` : '';
+  const monthAttr = isEdit ? 'readonly' : '';
   openLayerModal({
     title,
     description: description || '월 단위 실적을 입력하면 즉시 반영됩니다.',
@@ -1116,17 +1133,18 @@ function openMonthlyUpdateModal({
     bodyHtml: `
       <div class="field-row">
         <label for="layerMonthlyYm">월 *</label>
-        <input id="layerMonthlyYm" name="yearMonth" type="month" required />
+        <input id="layerMonthlyYm" name="yearMonth" type="month" required max="${esc(currentMonth)}" ${monthAttr} ${yearMonthValueAttr} />
       </div>
       <div class="field-row">
         <label for="layerMonthlyValue">${esc(valueLabel || '실적값')} *</label>
-        <input id="layerMonthlyValue" name="actualValue" type="number" step="${esc(step)}" ${minAttr} ${maxAttr} placeholder="${esc(valuePlaceholder || '')}" required />
+        <input id="layerMonthlyValue" name="actualValue" type="number" step="${esc(step)}" ${minAttr} ${maxAttr} placeholder="${esc(valuePlaceholder || '')}" ${valueValueAttr} required />
       </div>
     `,
     onSubmit: async (formData) => {
       const yearMonth = String(formData.get('yearMonth') || '').trim();
       const actualValueRaw = String(formData.get('actualValue') || '').trim();
       if (!yearMonth) throw new Error('월을 선택해 주세요.');
+      if (yearMonth > currentMonth) throw new Error('현재 월을 기준으로 과거/현재 월만 입력할 수 있습니다.');
       const actualValue = Number(actualValueRaw);
       if (!Number.isFinite(actualValue)) throw new Error('실적값은 숫자여야 합니다.');
       if (min !== undefined && actualValue < Number(min)) {
@@ -1170,19 +1188,19 @@ function openExperimentModal({
   selectedTargetId = ''
 }) {
   const isEdit = mode === 'edit';
+  const normalizedTargetType = String(selectedTargetType || '').trim();
+  const normalizedTargetId = String(selectedTargetId || '').trim();
   const targetOptions = [
-    ...(krs || []).map((item) => ({
-      value: `kr:${item.id}`,
-      label: `KR · ${item.title}`
-    })),
-    ...(initiatives || []).map((item) => ({
-      value: `initiative:${item.id}`,
-      label: `Initiative · ${item.title}`
-    }))
+    ...(Array.isArray(krs) ? krs : []).map((item) => ({ ...item, targetType: 'kr' })),
+    ...(Array.isArray(initiatives) ? initiatives : []).map((item) => ({ ...item, targetType: 'initiative' }))
   ];
-  const selectedTargetValue = selectedTargetType && selectedTargetId ? `${selectedTargetType}:${selectedTargetId}` : '';
+
   const targetOptionHtml = targetOptions
-    .map((item) => `<option value="${esc(item.value)}" ${item.value === selectedTargetValue ? 'selected' : ''}>${esc(item.label)}</option>`)
+    .map((item) => {
+      const valuePrefix = item.targetType === 'kr' ? 'kr' : 'initiative';
+      const label = item.targetType === 'kr' ? 'KR' : 'Initiative';
+      return `<option value="${esc(valuePrefix)}::${esc(item.id)}" ${normalizedTargetType === valuePrefix && normalizedTargetId === String(item.id) ? 'selected' : ''}>${label} · ${esc(item.title)}</option>`;
+    })
     .join('');
   const platformList = Array.isArray(platformExperiments) ? platformExperiments : [];
   let selectedPlatformId = String(experiment?.platformExperimentId || '');
@@ -1199,16 +1217,16 @@ function openExperimentModal({
 
   openLayerModal({
     title: isEdit ? 'Experiment 수정' : 'Experiment 등록',
-    description: '상위 목표를 선택한 뒤 실험 플랫폼에서 제목을 불러와 1:1로 매핑합니다.',
+    description: '상위 목표를 하나 선택한 뒤 실험 플랫폼에서 제목을 불러옵니다.',
     submitLabel: isEdit ? '수정 저장' : '등록',
     bodyHtml: `
       <div class="field-row">
-        <label for="layerExperimentTarget">상위 목표 *</label>
-        <select id="layerExperimentTarget" name="target" required>
-          <option value="">선택해 주세요</option>
-          ${targetOptionHtml}
+        <label for="layerExperimentTargetRef">상위 목표</label>
+        <select id="layerExperimentTargetRef" name="targetRef" required>
+          <option value="">상위 목표 선택</option>
+          ${targetOptionHtml || '<option value="" disabled>연결 가능한 상위 목표가 없습니다.</option>'}
         </select>
-        <small class="field-help">실험은 KR 또는 Initiative 중 1개에만 연결됩니다.</small>
+        <small class="field-help">실험은 상위 목표 하나에만 연결됩니다.</small>
       </div>
       <div class="field-row">
         <label for="layerPlatformExperimentId">실험 제목 *</label>
@@ -1220,13 +1238,10 @@ function openExperimentModal({
       </div>
     `,
     onSubmit: async (formData) => {
-      const targetRaw = String(formData.get('target') || '').trim();
-      if (!targetRaw || !targetRaw.includes(':')) {
-        throw new Error('상위 목표를 선택해 주세요.');
-      }
-      const [targetType, targetId] = targetRaw.split(':');
-      if (!targetType || !targetId) {
-        throw new Error('상위 목표 값이 올바르지 않습니다.');
+      const targetRef = String(formData.get('targetRef') || '').trim();
+      const [targetType, targetId] = targetRef.split('::');
+      if (!targetId || !['kr', 'initiative'].includes(String(targetType || '').trim())) {
+        throw new Error('상위 목표를 하나 선택해 주세요.');
       }
       const platformExperimentId = String(formData.get('platformExperimentId') || '').trim();
       if (!platformExperimentId) {
@@ -1690,7 +1705,6 @@ async function renderKRDetail() {
     { label: '상태', value: detail.kr.status || '-', variant: 'status' }
   ]);
   const krMonthlyRows = [...(detail.monthly || [])].sort((a, b) => String(a.yearMonth).localeCompare(String(b.yearMonth)));
-  const krMonthlyMax = krMonthlyRows.reduce((max, item) => Math.max(max, Number(item.actualValue) || 0), 0);
   const krUnitLabel = detail.kr.unit ? ` ${detail.kr.unit}` : '';
 
   el.pageContent.innerHTML = `
@@ -1761,22 +1775,22 @@ async function renderKRDetail() {
             <h3>월 실적</h3>
             ${krMonthlyRows.length === 0
     ? '<div class="empty">월 실적 데이터 없음</div>'
-    : `<div class="monthly-horizontal-chart">
-                ${krMonthlyRows
-        .map((item) => {
-          const value = Number(item.actualValue) || 0;
-          const width = krMonthlyMax > 0 ? Math.max(4, Math.min(100, (value / krMonthlyMax) * 100)) : 4;
-          return `<div class="monthly-bar-row">
-                    <div class="monthly-bar-head">
-                      <span>${esc(item.yearMonth)}</span>
-                      <strong>${fmtNumber(value)}${esc(krUnitLabel)}</strong>
-                    </div>
-                    <div class="progress-track monthly-track">
-                      <div class="progress-fill monthly-fill" style="width:${width}%"></div>
-                    </div>
-                  </div>`;
-        })
+    : `<div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>월</th><th>실적</th><th>Source</th><th></th></tr></thead>
+                  <tbody>
+                    ${krMonthlyRows
+        .map(
+          (item) => `<tr>
+                      <td>${esc(item.yearMonth)}</td>
+                      <td>${fmtNumber(item.actualValue)}${esc(krUnitLabel)}</td>
+                      <td>${statusBadge(item.sourceType || '-')}</td>
+                      <td><button class="btn ghost table-inline-btn" type="button" data-edit-kr-monthly="${esc(state.selectedKrId)}" data-ym="${esc(item.yearMonth)}" data-value="${esc(item.actualValue || 0)}">수정</button></td>
+                    </tr>`
+        )
         .join('')}
+                  </tbody>
+                </table>
               </div>`}
           </section>
         </div>
@@ -1895,6 +1909,27 @@ async function renderKRDetail() {
       valueLabel: detail.kr.unit ? `실적값 (${detail.kr.unit})` : '실적값',
       step: '0.01',
       successMessage: '월 실적이 저장되었습니다.'
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-edit-kr-monthly]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetId = button.dataset.editKrMonthly || '';
+      const yearMonth = String(button.dataset.ym || '').trim();
+      const rawValue = Number(button.dataset.value);
+      if (!targetId || !yearMonth) return;
+      openMonthlyUpdateModal({
+        title: 'KR 월 실적 수정',
+        description: 'KR 실적값을 월 단위로 수정합니다.',
+        targetType: 'kr',
+        targetId,
+        defaultYearMonth: yearMonth,
+        defaultValue: Number.isFinite(rawValue) ? rawValue : undefined,
+        valueLabel: detail.kr.unit ? `실적값 (${detail.kr.unit})` : '실적값',
+        step: '0.01',
+        isEdit: true,
+        successMessage: '월 실적이 수정되었습니다.'
+      });
     });
   });
 
@@ -2097,6 +2132,53 @@ async function renderOKRTable() {
   const data = await fetchJSON(`/api/dashboard/okr-table${query}`);
 
   const rows = data.rows || [];
+  const getNormalizedExperiments = (row) => {
+    const list = Array.isArray(row?.linkedExperiments) ? row.linkedExperiments : [];
+    const normalized = list.map((item) => ({
+      title: textOrDash(item?.title),
+      startDate: textOrDash(item?.startDate),
+      endDate: textOrDash(item?.endDate),
+      result: textOrDash(item?.result)
+    }));
+
+    const hasLegacy =
+      textOrDash(row?.linkedExperimentTitle) !== '-' ||
+      textOrDash(row?.linkedExperimentStartDate) !== '-' ||
+      textOrDash(row?.linkedExperimentEndDate) !== '-' ||
+      textOrDash(row?.linkedExperimentResult) !== '-';
+
+    if (normalized.length === 0 && hasLegacy) {
+      normalized.push({
+        title: textOrDash(row?.linkedExperimentTitle),
+        startDate: textOrDash(row?.linkedExperimentStartDate),
+        endDate: textOrDash(row?.linkedExperimentEndDate),
+        result: textOrDash(row?.linkedExperimentResult)
+      });
+    }
+
+    const countHint = Number(row?.linkedExperimentCount || 0);
+    const expectedCount = Number.isFinite(countHint) && countHint > 0 ? countHint : normalized.length;
+    while (normalized.length < expectedCount) {
+      normalized.push({
+        title: '-',
+        startDate: '-',
+        endDate: '-',
+        result: '-'
+      });
+    }
+
+    return normalized;
+  };
+
+  const normalizedRows = rows.map((row) => ({
+    ...row,
+    linkedExperiments: getNormalizedExperiments(row)
+  }));
+
+  const maxLinkedExperimentCount = normalizedRows.reduce(
+    (max, row) => Math.max(max, Number(row.linkedExperiments.length || 0)),
+    0
+  );
   const summary = data.summary || { total: 0, byClassification: {}, bySignal: {} };
   const pagination = data.pagination || { page: 1, pageSize: state.tablePageSize, totalPages: 1, total: rows.length };
   state.tablePage = Number(pagination.page || 1);
@@ -2106,6 +2188,16 @@ async function renderOKRTable() {
     currentPage: pagination.page,
     dataAttr: 'table'
   });
+
+  const experimentColumns = Array.from({ length: maxLinkedExperimentCount }, (_, index) => {
+    const slot = index + 1;
+    return `
+      <th class="col-exp-title">실험 제목 ${slot}</th>
+      <th class="col-exp-date">실험 시작일 ${slot}</th>
+      <th class="col-exp-date">실험 종료일 ${slot}</th>
+      <th class="col-exp-result">실험 결과 ${slot}</th>
+    `;
+  }).join('');
 
   el.pageContent.innerHTML = `
     ${dashboardQuickActions()}
@@ -2131,7 +2223,7 @@ async function renderOKRTable() {
           </select>
         </div>
       </div>
-      ${rows.length === 0 ? '<div class="empty">조건에 맞는 데이터가 없습니다.</div>' : `
+      ${normalizedRows.length === 0 ? '<div class="empty">조건에 맞는 데이터가 없습니다.</div>' : `
         <div class="table-wrap okr-table-wrap">
           <table class="data-table okr-table">
             <thead>
@@ -2155,16 +2247,25 @@ async function renderOKRTable() {
                 <th class="col-number">Q1 달성률</th>
                 <th class="col-number">Q2 달성률</th>
                 <th class="col-status">신호</th>
-                <th class="col-exp-title">실험 제목</th>
-                <th class="col-exp-date">실험 시작일</th>
-                <th class="col-exp-date">실험 종료일</th>
-                <th class="col-exp-result">실험 결과</th>
+                ${experimentColumns}
               </tr>
             </thead>
             <tbody>
-              ${rows
+              ${normalizedRows
                 .map(
-                  (row) => `<tr class="${esc(classificationRowTone(row.effectiveClassification))}">
+                  (row) => {
+                    const expCells = Array.from({ length: maxLinkedExperimentCount }, (_, index) => {
+                      const exp = row?.linkedExperiments?.[index] || null;
+                      const title = textOrDash(exp?.title);
+                      const startDate = textOrDash(exp?.startDate);
+                      const endDate = textOrDash(exp?.endDate);
+                      const result = textOrDash(exp?.result);
+                      return `<td class="col-exp-title cell-text">${esc(title)}</td>
+                        <td class="col-exp-date">${esc(startDate)}</td>
+                        <td class="col-exp-date">${esc(endDate)}</td>
+                        <td class="col-exp-result cell-text">${esc(result)}</td>`;
+                    }).join('');
+                    return `<tr class="${esc(classificationRowTone(row.effectiveClassification))}">
                     <td class="col-classification">${classificationBadge(row.effectiveClassification)}</td>
                     <td class="col-domain">${tableMetaBadge(row.domain || '-', 'domain')}</td>
                     <td class="col-aarrr">${tableMetaBadge(row.aarrrTag || '-', 'aarrr')}</td>
@@ -2184,11 +2285,9 @@ async function renderOKRTable() {
                     <td class="col-number">${percentOrDash(row.q1Achievement)}</td>
                     <td class="col-number">${percentOrDash(row.q2Achievement)}</td>
                     <td class="col-status">${signalBadge(row.signal)}</td>
-                    <td class="col-exp-title cell-text">${esc(linkedExperimentTitleOrDash(row))}</td>
-                    <td class="col-exp-date">${esc(textOrDash(row.linkedExperimentStartDate))}</td>
-                    <td class="col-exp-date">${esc(textOrDash(row.linkedExperimentEndDate))}</td>
-                    <td class="col-exp-result cell-text">${esc(textOrDash(row.linkedExperimentResult))}</td>
-                  </tr>`
+                    ${expCells}
+                  </tr>`;
+                  }
                 )
                 .join('')}
             </tbody>
@@ -2837,7 +2936,7 @@ async function renderInitiatives() {
           ${monthly.length === 0 ? '<div class="empty">월 실적 데이터가 없습니다.</div>' : `
             <div class="table-wrap">
               <table class="data-table">
-                <thead><tr><th>Month</th><th>Value</th><th>Source</th></tr></thead>
+                <thead><tr><th>Month</th><th>Value</th><th>Source</th><th></th></tr></thead>
                 <tbody>
                   ${monthly
                     .map(
@@ -2845,6 +2944,7 @@ async function renderInitiatives() {
                         <td>${esc(item.yearMonth)}</td>
                         <td>${fmtNumber(item.actualValue)}</td>
                         <td>${statusBadge(item.sourceType)}</td>
+                        <td><button class="btn ghost table-inline-btn" type="button" data-edit-initiative-monthly="${esc(selectedInitiative.id)}" data-ym="${esc(item.yearMonth)}" data-value="${esc(item.actualValue || 0)}">수정</button></td>
                       </tr>`
                     )
                     .join('')}
@@ -2935,6 +3035,41 @@ async function renderInitiatives() {
           })
         });
       }
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-edit-initiative-monthly]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetId = button.dataset.editInitiativeMonthly || '';
+      const yearMonth = String(button.dataset.ym || '').trim();
+      const rawValue = Number(button.dataset.value);
+      if (!targetId || !yearMonth) return;
+      openMonthlyUpdateModal({
+        title: 'Initiative 월 실적 수정',
+        description: 'Initiative 진행률(%)을 월 단위로 입력합니다.',
+        targetType: 'initiative',
+        targetId,
+        defaultYearMonth: yearMonth,
+        defaultValue: Number.isFinite(rawValue) ? rawValue : undefined,
+        valueLabel: '진행률(%)',
+        valuePlaceholder: '0~100',
+        min: 0,
+        max: 100,
+        step: '0.01',
+        isEdit: true,
+        successMessage: '월 실적이 수정되었습니다.',
+        afterUpsert: async (progressValue) => {
+          await fetchJSON(`/api/initiatives/${encodeURIComponent(targetId)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              progressQuant: progressValue,
+              actor: 'pm.demo',
+              reason: 'update initiative progress from monthly entry'
+            })
+          });
+        }
+      });
     });
   });
 
@@ -3869,6 +4004,182 @@ async function renderAdminPresets() {
   });
 }
 
+async function renderAdminNotifications() {
+  const render = async () => {
+    const currentMonth = (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    })();
+    const monthFilter = String(document.getElementById('notificationMonthFilter')?.value || '').trim();
+    const statusFilter = String(document.getElementById('notificationStatusFilter')?.value || 'all').trim();
+    const params = new URLSearchParams();
+    params.set('limit', '300');
+    if (monthFilter) params.set('yearMonth', monthFilter);
+    if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
+    const data = await fetchJSON(`/api/admin/notifications?${params.toString()}`);
+
+    const notifications = Array.isArray(data.notifications) ? data.notifications : [];
+    const normalizeNotificationStatus = (status) => {
+      const raw = String(status || '').trim();
+      if (!raw) return 'missing';
+      if (raw === '미등록') return 'missing';
+      if (raw === '실적 등록' || raw === '등록') return 'registered';
+      return raw.toLowerCase();
+    };
+
+    const normalizedNotifications = notifications.map((item) => ({
+      ...item,
+      __status: normalizeNotificationStatus(item.status),
+      __division: textOrDash(item.division || item.targetDivision || '-'),
+      __owner: textOrDash(item.owner || item.targetOwner || '-')
+    }));
+    const derivedSummary = {
+      total: normalizedNotifications.length,
+      registered: normalizedNotifications.filter((item) => item.__status === 'registered').length,
+      missing: normalizedNotifications.filter((item) => item.__status === 'missing').length
+    };
+    const summary = derivedSummary;
+    const targetTypeLabels = {
+      kr: 'KR',
+      sub_kr: 'Sub-KR',
+      initiative: 'Initiative'
+    };
+    const valueLabelByType = {
+      kr: '실적값',
+      sub_kr: '실적값',
+      initiative: '진행률(%)'
+    };
+    const statusLabelByType = {
+      registered: '실적 등록',
+      missing: '미등록'
+    };
+
+    const monthFilterOptions = (() => {
+      const options = ['<option value="">전체</option>'];
+      for (let i = 0; i < 12; i += 1) {
+        const cursor = new Date(currentMonth + '-01');
+        cursor.setMonth(cursor.getMonth() - i);
+        const value = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+        options.push(`<option value="${value}" ${value === monthFilter ? 'selected' : ''}>${value}</option>`);
+      }
+      return options.join('');
+    })();
+
+    el.pageContent.innerHTML = `
+      <section class="card panel">
+        <div class="section-head-inline">
+          <h3>월 실적 알림</h3>
+          <div>
+            <select id="notificationMonthFilter">
+              ${monthFilterOptions}
+            </select>
+            <select id="notificationStatusFilter">
+              <option value="all">전체</option>
+              <option value="registered">실적 등록</option>
+              <option value="missing">미등록</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid-3" style="margin-bottom:12px;">
+          <div class="stat"><p class="k">전체</p><p class="v">${summary.total || 0}</p></div>
+          <div class="stat"><p class="k">실적 등록</p><p class="v">${summary.registered || 0}</p></div>
+          <div class="stat"><p class="k">미등록</p><p class="v">${summary.missing || 0}</p></div>
+        </div>
+        ${normalizedNotifications.length === 0
+      ? '<div class="empty">현재 기준 알림이 없습니다.</div>'
+      : `<div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>대상</th><th>대상명</th><th>담당조직</th><th>담당자</th><th>미입력 월</th><th>상태</th><th>액션</th></tr></thead>
+                <tbody>
+                  ${normalizedNotifications
+                    .map(
+                      (item) => `<tr data-notification-row data-status="${esc(item.__status || item.status || '')}">
+                          <td>${esc(targetTypeLabels[item.targetType] || item.targetType || '-')}</td>
+                          <td>${esc(item.targetTitle || '-')}</td>
+                          <td>${esc(item.__division || '-')}</td>
+                          <td>${esc(item.__owner || '-')}</td>
+                          <td>${esc(item.yearMonth || '-')}</td>
+                          <td><span class="badge ${esc(item.__status === 'missing' ? 'danger' : 'status')}">${esc(statusLabelByType[item.__status] || statusLabelByType[item.status] || item.status || '-')}</span></td>
+                          <td>
+                            <button class="btn secondary table-inline-btn" type="button" data-noti-jump data-target-type="${esc(item.targetType || '')}" data-target-id="${esc(item.targetId || '')}" data-parent-kr="${esc(item.parentKrId || '')}">목표로 이동</button>
+                            <button class="btn table-inline-btn" type="button" data-noti-update data-target-type="${esc(item.targetType || '')}" data-target-id="${esc(item.targetId || '')}" data-ym="${esc(item.yearMonth || '')}">월 실적 업데이트</button>
+                          </td>
+                        </tr>`
+                    )
+                    .join('')}
+                </tbody>
+              </table>
+            </div>`
+        }
+      </section>
+    `;
+
+    const filter = document.getElementById('notificationStatusFilter');
+    const monthInput = document.getElementById('notificationMonthFilter');
+    if (filter) {
+      filter.value = statusFilter;
+    }
+
+    if (filter) {
+      filter.addEventListener('change', render);
+    }
+    if (monthInput) {
+      monthInput.addEventListener('change', render);
+    }
+
+    el.pageContent.querySelectorAll('[data-noti-jump]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetType = String(button.dataset.targetType || '').trim();
+        const targetId = String(button.dataset.targetId || '').trim();
+        const parentKrId = String(button.dataset.parentKr || '').trim();
+        if (targetType === 'kr' && targetId) {
+          state.selectedKrId = targetId;
+          navigate('/goals/krs');
+          return;
+        }
+        if (targetType === 'sub_kr' && parentKrId) {
+          state.selectedKrId = parentKrId;
+          navigate('/goals/krs');
+          return;
+        }
+        if (targetType === 'initiative' && targetId) {
+          state.selectedInitiativeId = targetId;
+          navigate('/goals/initiatives');
+        }
+      });
+    });
+
+    el.pageContent.querySelectorAll('[data-noti-update]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetType = String(button.dataset.targetType || '').trim();
+        const targetId = String(button.dataset.targetId || '').trim();
+        const yearMonth = String(button.dataset.ym || '').trim();
+        if (!targetType || !targetId || !yearMonth) return;
+        const valueLabel = valueLabelByType[targetType] || '실적값';
+        const extra = targetType === 'initiative'
+          ? { min: 0, max: 100, description: 'Initiative 진행률(%)을 월 단위로 입력합니다.' }
+          : {};
+        openMonthlyUpdateModal({
+          title: '월 실적 업데이트',
+          description: extra.description || '월 단위 실적을 입력합니다.',
+          targetType,
+          targetId,
+          valueLabel,
+          valuePlaceholder: valueLabel === '진행률(%)' ? '0~100' : '입력',
+          min: extra.min,
+          max: extra.max,
+          defaultYearMonth: yearMonth,
+          step: '0.01',
+          isEdit: true,
+          successMessage: '월 실적이 저장되었습니다.'
+        });
+      });
+    });
+  };
+
+  await render();
+}
+
 async function renderAdminLogs() {
   const [auditLogs, decisionLogs] = await Promise.all([
     fetchJSON('/api/audit-logs?limit=80'),
@@ -4017,16 +4328,20 @@ async function renderExperiments() {
     initiativeByExperiment.get(link.experimentId).push(link);
   });
 
-  function resolvePrimaryParentTarget(experimentId) {
-    const candidates = [];
+  function resolveExperimentTargets(experimentId) {
+    const targets = [];
+    const dedupe = new Set();
 
     (initiativeByExperiment.get(experimentId) || []).forEach((link) => {
       const initiative = initiativeMap.get(link.initiativeId);
       if (!initiative) return;
-      candidates.push({
+      const key = `initiative:${initiative.id}`;
+      if (dedupe.has(key)) return;
+      dedupe.add(key);
+      targets.push({
         type: 'initiative',
         id: initiative.id,
-        label: `Initiative: ${initiative.title}`,
+        label: initiative.title,
         sortKey: String(link.updatedAt || link.createdAt || '')
       });
     });
@@ -4034,28 +4349,26 @@ async function renderExperiments() {
     (krByExperiment.get(experimentId) || []).forEach((link) => {
       const kr = krMap.get(link.krId);
       if (!kr) return;
-      candidates.push({
+      const key = `kr:${kr.id}`;
+      if (dedupe.has(key)) return;
+      dedupe.add(key);
+      targets.push({
         type: 'kr',
         id: kr.id,
-        label: `KR: ${kr.title}`,
+        label: kr.title,
         sortKey: String(link.updatedAt || link.createdAt || '')
       });
     });
 
-    if (candidates.length === 0) return null;
-    candidates.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
-    const top = candidates[0];
-    return {
-      type: top.type,
-      id: top.id,
-      label: top.label
-    };
+    targets.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+    return targets;
   }
 
   const normalizedSearch = String(state.searchQuery || '').trim().toLowerCase();
   const filteredRows = experiments
     .map((exp) => {
-      const parentTarget = resolvePrimaryParentTarget(exp.id);
+      const targets = resolveExperimentTargets(exp.id);
+      const targetLabels = targets.map((item) => `${item.type === 'kr' ? 'KR' : 'Initiative'}: ${item.label}`);
       const searchBlob = [
         exp.title,
         exp.status,
@@ -4064,11 +4377,11 @@ async function renderExperiments() {
         exp.endDate,
         exp.result,
         exp.owner,
-        parentTarget ? parentTarget.label : ''
+        ...targetLabels
       ]
         .map((item) => String(item || '').toLowerCase())
         .join(' ');
-      return { exp, parentTarget, searchBlob };
+      return { exp, targets, searchBlob };
     })
     .filter((row) => !normalizedSearch || row.searchBlob.includes(normalizedSearch));
   const totalRows = filteredRows.length;
@@ -4127,12 +4440,21 @@ async function renderExperiments() {
                     <td class="exp-col-result"><span class="exp-one-line-text">${esc(row.exp.result || '-')}</span></td>
                     <td class="exp-col-owner">${esc(row.exp.owner || '-')}</td>
                     <td class="exp-col-parent">
-                      ${row.parentTarget
-                        ? `<div class="exp-parent-links">
-                            <button class="exp-parent-link" type="button" data-parent-type="${esc(row.parentTarget.type)}" data-parent-id="${esc(row.parentTarget.id)}" title="${esc(row.parentTarget.label)}">${esc(row.parentTarget.label)}</button>
+                    ${row.targets.length === 0
+                        ? '-'
+                        : `<div class="exp-parent-links">
+                            ${row.targets
+                              .map(
+                                (target) =>
+                                  `<button class="exp-parent-link" type="button" data-parent-type="${esc(
+                                    target.type
+                                  )}" data-parent-id="${esc(target.id)}" title="${esc(target.label)}">${esc(
+                                    `${target.type === 'kr' ? 'KR: ' : 'Initiative: '}${target.label}`
+                                  )}</button>`
+                              )
+                              .join('')}
                           </div>`
-                        : '-'}
-                    </td>
+                    }</td>
                     <td class="exp-col-action">
                       <button class="btn ghost table-inline-btn" type="button" data-delete-experiment="${esc(row.exp.id)}" data-experiment-title="${esc(row.exp.title)}">삭제</button>
                     </td>
@@ -4181,19 +4503,20 @@ async function renderExperiments() {
   }
 
   el.pageContent.querySelectorAll('[data-edit-experiment]').forEach((button) => {
-    button.addEventListener('click', () => {
+        button.addEventListener('click', () => {
       const experimentId = button.dataset.editExperiment;
       const experiment = experimentMap.get(experimentId);
       if (!experiment) return;
-      const parentTarget = resolvePrimaryParentTarget(experimentId);
+      const selectedTargets = resolveExperimentTargets(experimentId);
+      const selectedTarget = selectedTargets[0];
       openExperimentModal({
         mode: 'edit',
         krs,
         initiatives,
         platformExperiments,
         experiment,
-        selectedTargetType: parentTarget?.type || '',
-        selectedTargetId: parentTarget?.id || ''
+        selectedTargetType: selectedTarget?.type || '',
+        selectedTargetId: selectedTarget?.id || ''
       });
     });
   });

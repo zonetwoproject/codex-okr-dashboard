@@ -1014,6 +1014,19 @@ function parseYearMonth(value) {
   return { year: Number(match[1]), month: Number(match[2]) };
 }
 
+function normalizeTargetIds(values, fallback = []) {
+  const source = Array.isArray(values) ? values : fallback;
+  const seen = new Set();
+  const result = [];
+  source.forEach((value) => {
+    const targetId = String(value || '').trim();
+    if (!targetId || seen.has(targetId)) return;
+    seen.add(targetId);
+    result.push(targetId);
+  });
+  return result;
+}
+
 function halfMonthStart(half) {
   return half === 'H2' ? 7 : 1;
 }
@@ -1027,6 +1040,250 @@ function calendarMonthToHalfDisplayMonth(half, calendarMonth) {
   const display = Number(calendarMonth) - halfMonthStart(half) + 1;
   if (display < 1 || display > 6) return null;
   return display;
+}
+
+function currentUtcYearMonth() {
+  const now = new Date();
+  return {
+    year: now.getUTCFullYear(),
+    month: now.getUTCMonth() + 1
+  };
+}
+
+function formatYearMonth(year, month) {
+  return `${Number(year)}-${String(month).padStart(2, '0')}`;
+}
+
+function isCalendarMonthInFuture(year, month, now = currentUtcYearMonth()) {
+  return Number(year) > Number(now.year) || (Number(year) === Number(now.year) && Number(month) > Number(now.month));
+}
+
+function buildNotificationContextMaps(store) {
+  return {
+    objectiveMap: new Map(store.objectives.filter((item) => !item.deletedAt).map((item) => [item.id, item])),
+    krMap: new Map(store.krs.filter((item) => !item.deletedAt).map((item) => [item.id, item])),
+    subKrMap: new Map(store.subKrs.filter((item) => !item.deletedAt).map((item) => [item.id, item])),
+    initiativeMap: new Map(store.initiatives.filter((item) => !item.deletedAt).map((item) => [item.id, item]))
+  };
+}
+
+function resolveObjectiveFromTarget(context, targetType, targetId) {
+  if (targetType === 'kr') {
+    const target = context.krMap.get(targetId);
+    if (!target) return null;
+    return context.objectiveMap.get(target.objectiveId) || null;
+  }
+
+  if (targetType === 'sub_kr') {
+    const target = context.subKrMap.get(targetId);
+    if (!target) return null;
+    const kr = context.krMap.get(target.krId);
+    if (!kr) return null;
+    return context.objectiveMap.get(kr.objectiveId) || null;
+  }
+
+  if (targetType === 'initiative') {
+    const target = context.initiativeMap.get(targetId);
+    if (!target) return null;
+    const mappedSubKr = target.subKrId ? context.subKrMap.get(target.subKrId) : null;
+    const mappedKr = mappedSubKr ? context.krMap.get(mappedSubKr.krId) : null;
+    const krFromMap = target.krId ? context.krMap.get(target.krId) : null;
+    const objectiveId = krFromMap ? krFromMap.objectiveId : mappedKr ? mappedKr.objectiveId : target.objectiveId;
+    if (!objectiveId) return null;
+    return context.objectiveMap.get(objectiveId) || null;
+  }
+
+  return null;
+}
+
+function normalizeNotificationStatus(status) {
+  const rawStatus = String(status || '').trim();
+  if (!rawStatus) return '';
+  if (rawStatus === '미등록') return 'missing';
+  if (rawStatus === '실적 등록' || rawStatus === '등록') return 'registered';
+  return rawStatus.toLowerCase();
+}
+
+function normalizeNotificationText(value) {
+  const text = String(value || '').trim();
+  return text || '-';
+}
+
+function getMonthlyNotificationEntriesForTarget({
+  targetType,
+  targetId,
+  targetTitle,
+  objective,
+  targetDivision,
+  targetOwner,
+  monthlyPerformances,
+  now,
+  selectedYearMonth
+}) {
+  if (!objective) return [];
+  const year = Number(objective.year);
+  const half = String(objective.half || '').trim();
+  if (!Number.isFinite(year) || !['H1', 'H2'].includes(half)) return [];
+
+    const existing = new Set(
+      monthlyPerformances
+        .filter((item) => item.targetType === targetType && item.targetId === targetId)
+        .map((item) => item.yearMonth)
+    );
+
+  const monthCandidates = [];
+  const selectedMonth =
+    selectedYearMonth && Number(selectedYearMonth.year) === year
+      ? Number(selectedYearMonth.month)
+      : null;
+  const selectedDisplayMonth = selectedMonth ? calendarMonthToHalfDisplayMonth(half, selectedMonth) : null;
+
+  if (selectedMonth && selectedDisplayMonth) {
+    monthCandidates.push(selectedDisplayMonth);
+  } else if (!selectedYearMonth) {
+    for (let i = 1; i <= 6; i += 1) {
+      monthCandidates.push(i);
+    }
+  }
+
+  const rows = [];
+  for (let i = 1; i <= 6; i += 1) {
+    if (!monthCandidates.includes(i)) continue;
+
+    const calendarMonth = halfDisplayMonthToCalendarMonth(half, i);
+    if (isCalendarMonthInFuture(year, calendarMonth, now)) continue;
+
+    const yearMonth = formatYearMonth(year, calendarMonth);
+    const isRegistered = existing.has(yearMonth);
+
+    rows.push({
+      targetType,
+      targetId,
+      targetTitle,
+      status: normalizeNotificationStatus(isRegistered ? 'registered' : 'missing'),
+      division: normalizeNotificationText(targetDivision || '-'),
+      owner: normalizeNotificationText(targetOwner || '-'),
+      year,
+      half,
+      yearMonth,
+      month: calendarMonth
+    });
+  }
+  return rows;
+}
+
+function buildMonthlyNotificationItems(store) {
+  return buildMonthlyNotificationItemsForMonth(store, null);
+}
+
+function buildMonthlyNotificationItemsForMonth(store, selectedYearMonth = null) {
+  const now = currentUtcYearMonth();
+  const maps = buildNotificationContextMaps(store);
+  const notifications = [];
+  const baseArgs = { monthlyPerformances: store.monthlyPerformances, now, selectedYearMonth };
+
+  const krRows = store.krs.filter((item) => !item.deletedAt);
+  krRows.forEach((kr) => {
+    const objective = resolveObjectiveFromTarget(maps, 'kr', kr.id);
+  const missing = getMonthlyNotificationEntriesForTarget({
+      targetType: 'kr',
+      targetId: kr.id,
+      targetTitle: kr.title,
+      objective,
+      targetDivision: normalizeNotificationText(kr.division || objective?.division || objective?.teamId),
+      targetOwner: normalizeNotificationText(kr.owner || objective?.owner),
+      ...baseArgs
+    });
+    missing.forEach((item) => {
+      notifications.push({
+        targetType: item.targetType,
+        targetId: item.targetId,
+        targetTitle: item.targetTitle,
+        status: item.status,
+        division: item.division,
+        owner: item.owner,
+        yearMonth: item.yearMonth,
+        month: item.month,
+        year: item.year,
+        half: item.half,
+        parentKrId: kr.id,
+        parentObjectiveTitle: objective ? objective.title : '-',
+        parentObjectiveId: objective ? objective.id : null,
+        routeType: 'kr'
+      });
+    });
+  });
+
+  const subKrRows = store.subKrs.filter((item) => !item.deletedAt);
+  subKrRows.forEach((subKr) => {
+    const objective = resolveObjectiveFromTarget(maps, 'sub_kr', subKr.id);
+  const missing = getMonthlyNotificationEntriesForTarget({
+      targetType: 'sub_kr',
+      targetId: subKr.id,
+      targetTitle: subKr.title,
+      objective,
+      targetDivision: normalizeNotificationText(subKr.division || objective?.division || objective?.teamId),
+      targetOwner: normalizeNotificationText(subKr.owner || objective?.owner),
+      ...baseArgs
+    });
+    missing.forEach((item) => {
+      notifications.push({
+        targetType: item.targetType,
+        targetId: item.targetId,
+        targetTitle: item.targetTitle,
+        status: item.status,
+        division: item.division,
+        owner: item.owner,
+        yearMonth: item.yearMonth,
+        month: item.month,
+        year: item.year,
+        half: item.half,
+        parentKrId: subKr.krId || null,
+        parentObjectiveTitle: objective ? objective.title : '-',
+        parentObjectiveId: objective ? objective.id : null,
+        routeType: 'sub_kr'
+      });
+    });
+  });
+
+  const initiativeRows = store.initiatives.filter((item) => !item.deletedAt);
+  initiativeRows.forEach((initiative) => {
+    const objective = resolveObjectiveFromTarget(maps, 'initiative', initiative.id);
+  const missing = getMonthlyNotificationEntriesForTarget({
+      targetType: 'initiative',
+      targetId: initiative.id,
+      targetTitle: initiative.title,
+      objective,
+      targetDivision: normalizeNotificationText(initiative.division || objective?.division || objective?.teamId),
+      targetOwner: normalizeNotificationText(initiative.owner || objective?.owner),
+      ...baseArgs
+    });
+    missing.forEach((item) => {
+      notifications.push({
+        targetType: item.targetType,
+        targetId: item.targetId,
+        targetTitle: item.targetTitle,
+        status: item.status,
+        division: item.division,
+        owner: item.owner,
+        yearMonth: item.yearMonth,
+        month: item.month,
+        year: item.year,
+        half: item.half,
+        parentKrId: initiative.krId || null,
+        parentObjectiveTitle: objective ? objective.title : '-',
+        parentObjectiveId: objective ? objective.id : null,
+        routeType: 'initiative'
+      });
+    });
+  });
+
+  return notifications.sort((a, b) => {
+    const ym = String(a.yearMonth || '').localeCompare(String(b.yearMonth || ''));
+    if (ym !== 0) return ym;
+    if (a.targetType !== b.targetType) return String(a.targetType || '').localeCompare(String(b.targetType || ''));
+    return String(a.targetTitle || '').localeCompare(String(b.targetTitle || ''));
+  });
 }
 
 function monthlyValuesByHalf(store, targetType, targetId, year, half) {
@@ -1387,7 +1644,14 @@ function resolveLinkedExperimentsForRow(row, context) {
     linkedExperimentTitle: top?.title || '',
     linkedExperimentStartDate: top?.startDate || '',
     linkedExperimentEndDate: top?.endDate || '',
-    linkedExperimentResult: top ? normalizeExperimentResult(top.result, '위너 선정 전') : ''
+    linkedExperimentResult: top ? normalizeExperimentResult(top.result, '위너 선정 전') : '',
+    linkedExperiments: linkedExperiments.map((item) => ({
+      id: item.id,
+      title: item.title || '',
+      startDate: item.startDate || '',
+      endDate: item.endDate || '',
+      result: normalizeExperimentResult(item.result, '위너 선정 전')
+    }))
   };
 }
 
@@ -2665,41 +2929,53 @@ app.post('/api/experiments/:experimentId/mappings', async (req, res) => {
   const experiment = store.experiments.find((item) => item.id === req.params.experimentId && !item.deletedAt);
   if (!experiment) return fail(res, 404, 'experiment not found');
 
-  const krIds = [...new Set((Array.isArray(body.krIds) ? body.krIds : [])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean))];
-  const initiativeIds = [...new Set((Array.isArray(body.initiativeIds) ? body.initiativeIds : [])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean))];
-
-  let targetType = String(body.targetType || '').trim();
-  let targetId = String(body.targetId || '').trim();
-
-  if (!targetType || !targetId) {
-    const totalLegacyTargets = krIds.length + initiativeIds.length;
-    if (totalLegacyTargets !== 1) {
-      return fail(res, 400, 'exactly one mapping target is required');
+  const legacyTargetType = String(body.targetType || '').trim();
+  const legacyTargetId = String(body.targetId || '').trim();
+  const requestedPairs = [];
+  const pushPair = (targetType, targetId) => {
+    const normalizedType = String(targetType || '').trim();
+    const normalizedId = String(targetId || '').trim();
+    if (!normalizedType || !normalizedId) return;
+    if (normalizedType === 'kr' || normalizedType === 'initiative') {
+      requestedPairs.push({ type: normalizedType, id: normalizedId });
+      return;
     }
-    if (krIds.length === 1) {
-      targetType = 'kr';
-      targetId = krIds[0];
-    } else {
-      targetType = 'initiative';
-      targetId = initiativeIds[0];
+    throw new Error('targetType must be kr|initiative');
+  };
+
+  try {
+    normalizeTargetIds(body.krIds, []).forEach((id) => pushPair('kr', id));
+    normalizeTargetIds(body.initiativeIds, []).forEach((id) => pushPair('initiative', id));
+    if (legacyTargetType && legacyTargetId) {
+      pushPair(legacyTargetType, legacyTargetId);
     }
+  } catch (error) {
+    return fail(res, 400, error.message);
   }
 
-  if (targetType !== 'kr' && targetType !== 'initiative') {
-    return fail(res, 400, 'targetType must be kr|initiative');
+  const uniquePairSet = new Set();
+  const uniquePairs = [];
+  requestedPairs.forEach((pair) => {
+    const key = `${pair.type}:${pair.id}`;
+    if (uniquePairSet.has(key)) return;
+    uniquePairSet.add(key);
+    uniquePairs.push(pair);
+  });
+
+  if (uniquePairs.length === 0) {
+    return fail(res, 400, 'at least one mapping target is required');
+  }
+  if (uniquePairs.length > 1) {
+    return fail(res, 400, 'only one mapping target is allowed per experiment');
   }
 
-  if (targetType === 'kr') {
-    const hasKr = store.krs.some((item) => item.id === targetId && !item.deletedAt);
-    if (!hasKr) return fail(res, 400, `invalid krId: ${targetId}`);
-  }
-  if (targetType === 'initiative') {
-    const hasInitiative = store.initiatives.some((item) => item.id === targetId && !item.deletedAt);
-    if (!hasInitiative) return fail(res, 400, `invalid initiativeId: ${targetId}`);
+  const requestedTarget = uniquePairs[0];
+  if (requestedTarget.type === 'kr') {
+    const isValidKr = store.krs.some((item) => item.id === requestedTarget.id && !item.deletedAt);
+    if (!isValidKr) return fail(res, 400, `invalid krId: ${requestedTarget.id}`);
+  } else {
+    const isValidInitiative = store.initiatives.some((item) => item.id === requestedTarget.id && !item.deletedAt);
+    if (!isValidInitiative) return fail(res, 400, `invalid initiativeId: ${requestedTarget.id}`);
   }
 
   const existingKrLinks = store.krExperimentLinks.filter((item) => item.experimentId === experiment.id);
@@ -2707,46 +2983,51 @@ app.post('/api/experiments/:experimentId/mappings', async (req, res) => {
   const existingKrMap = new Map(existingKrLinks.map((item) => [item.krId, item]));
   const existingInitiativeMap = new Map(existingInitiativeLinks.map((item) => [item.initiativeId, item]));
   const timestamp = nowIso();
+  const parsedWeight = Number(body.weight);
+  const hasBodyWeight = Number.isFinite(parsedWeight);
 
   store.krExperimentLinks = store.krExperimentLinks.filter((item) => item.experimentId !== experiment.id);
   store.initiativeExperimentLinks = store.initiativeExperimentLinks.filter((item) => item.experimentId !== experiment.id);
 
-  if (targetType === 'kr') {
+  if (requestedTarget.type === 'kr') {
+    const targetId = requestedTarget.id;
     const existing = existingKrMap.get(targetId);
-    const weightValue = Number.isFinite(Number(body.weight))
-      ? Number(body.weight)
-      : Number(existing?.weight || 100);
-    const link = existing
-      ? {
-        ...existing,
-        weight: weightValue,
-        updatedAt: timestamp
-      }
-      : {
-        id: id('link'),
-        krId: targetId,
-        experimentId: experiment.id,
-        weight: weightValue,
-        rationale: null,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      };
-    store.krExperimentLinks.push(link);
+    const weightValue = hasBodyWeight ? parsedWeight : Number(existing?.weight || 100);
+    store.krExperimentLinks.push(
+      existing
+        ? {
+          ...existing,
+          weight: weightValue,
+          rationale: body.rationale || existing.rationale || null,
+          updatedAt: timestamp
+        }
+        : {
+          id: id('link'),
+          krId: targetId,
+          experimentId: experiment.id,
+          weight: weightValue,
+          rationale: body.rationale || null,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }
+    );
   } else {
+    const targetId = requestedTarget.id;
     const existing = existingInitiativeMap.get(targetId);
-    const link = existing
-      ? {
-        ...existing,
-        updatedAt: timestamp
-      }
-      : {
-        id: id('inilink'),
-        initiativeId: targetId,
-        experimentId: experiment.id,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      };
-    store.initiativeExperimentLinks.push(link);
+    store.initiativeExperimentLinks.push(
+      existing
+        ? {
+          ...existing,
+          updatedAt: timestamp
+        }
+        : {
+          id: id('inilink'),
+          initiativeId: targetId,
+          experimentId: experiment.id,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }
+    );
   }
 
   addAuditLog(store, {
@@ -2757,19 +3038,25 @@ app.post('/api/experiments/:experimentId/mappings', async (req, res) => {
     entityId: experiment.id,
     beforeValue: {
       krIds: existingKrLinks.map((item) => item.krId),
-      initiativeIds: existingInitiativeLinks.map((item) => item.initiativeId)
+      initiativeIds: existingInitiativeLinks.map((item) => item.initiativeId),
+      targetType: requestedTarget.type,
+      targetId: requestedTarget.id
     },
     afterValue: {
-      targetType,
-      targetId
+      targetType: requestedTarget.type,
+      targetId: requestedTarget.id,
+      krIds: requestedTarget.type === 'kr' ? [requestedTarget.id] : [],
+      initiativeIds: requestedTarget.type === 'initiative' ? [requestedTarget.id] : []
     }
   });
 
   if (!(await persistStoreOrFail(res, store))) return;
   res.json({
     experimentId: experiment.id,
-    targetType,
-    targetId
+    targetType: requestedTarget.type,
+    targetId: requestedTarget.id,
+    krIds: requestedTarget.type === 'kr' ? [requestedTarget.id] : [],
+    initiativeIds: requestedTarget.type === 'initiative' ? [requestedTarget.id] : []
   });
 });
 
@@ -3246,6 +3533,11 @@ app.post('/api/dashboard/okr-table/:rowId/monthly-upsert', async (req, res) => {
   if (!row) return fail(res, 404, 'row not found');
 
   const calendarMonth = halfDisplayMonthToCalendarMonth(row.half, month);
+  const now = currentUtcYearMonth();
+  if (isCalendarMonthInFuture(row.year, calendarMonth, now)) {
+    return fail(res, 400, 'yearMonth cannot be in the future');
+  }
+
   const yearMonth = `${row.year}-${String(calendarMonth).padStart(2, '0')}`;
   const targetType = targetTypeFromEntityType(found.entityType);
 
@@ -3576,6 +3868,50 @@ app.get('/api/input-sources/summary', (req, res) => {
 
 app.get('/api/admin/roles', (_req, res) => {
   res.json(ROLE_MATRIX);
+});
+
+app.get('/api/admin/notifications', (req, res) => {
+  const store = loadStore();
+  const targetType = String(req.query.targetType || '').trim();
+  const targetId = String(req.query.targetId || '').trim();
+  let statusFilter = normalizeNotificationStatus(req.query.status || '');
+  const yearMonthParam = String(req.query.yearMonth || '').trim();
+  const limit = Number(req.query.limit || 0);
+
+  let selectedYearMonth = null;
+  if (yearMonthParam) {
+    const parsed = parseYearMonth(yearMonthParam);
+    if (!parsed) return fail(res, 400, 'yearMonth is invalid');
+    selectedYearMonth = parsed;
+  }
+
+  let notifications = buildMonthlyNotificationItemsForMonth(store, selectedYearMonth);
+  if (targetType) {
+    notifications = notifications.filter((item) => item.targetType === targetType);
+  }
+  if (targetId) {
+    notifications = notifications.filter((item) => item.targetId === targetId);
+  }
+  if (statusFilter && !['registered', 'missing'].includes(statusFilter)) {
+    statusFilter = '';
+  }
+
+  const summary = {
+    total: notifications.length,
+    registered: notifications.filter((item) => normalizeNotificationStatus(item.status) === 'registered').length,
+    missing: notifications.filter((item) => normalizeNotificationStatus(item.status) === 'missing').length
+  };
+
+  if (statusFilter) {
+    notifications = notifications.filter((item) => normalizeNotificationStatus(item.status) === statusFilter);
+  }
+
+  const maxResults = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : notifications.length;
+
+  res.json({
+    notifications: notifications.slice(0, maxResults),
+    summary
+  });
 });
 
 app.get('/api/admin/presets', (_req, res) => {
