@@ -10,8 +10,8 @@ const ROUTES = {
     render: renderDomain
   },
   '/goals/krs': {
-    title: '목표/이니셔티브 / KR',
-    desc: 'KR 달성도와 실험 기여도를 상세 분석하고 KR/KR(세부)를 관리합니다.',
+    title: '목표/이니셔티브 / KR/SubKR',
+    desc: 'KR/Sub-KR 달성도와 실험 기여도를 상세 분석하고 통합 관리합니다.',
     render: renderKRDetail
   },
   '/dashboard/review': {
@@ -49,10 +49,15 @@ const ROUTES = {
     desc: 'OKR/인풋 프리셋을 등록, 수정, 삭제합니다.',
     render: renderAdminPresets
   },
+  '/dashboard/notifications': {
+    title: 'Dashboard / Notifications',
+    desc: 'KR/Sub-KR/Initiative 실적 알림을 월 단위로 관리합니다.',
+    render: renderDashboardNotifications
+  },
   '/admin/notifications': {
     title: 'Notifications',
-    desc: 'KR/Sub-KR/Initiative 실적 알림을 월 단위로 확인합니다.',
-    render: renderAdminNotifications
+    desc: 'KR/Sub-KR/Initiative 실적 알림을 월 단위로 관리합니다.',
+    render: renderDashboardNotifications
   },
   '/admin/logs': {
     title: '관리 / Audit Logs',
@@ -64,7 +69,7 @@ const ROUTES = {
 const MENU = [
   {
     group: '대시보드',
-    routes: ['/dashboard/executive', '/dashboard/domain', '/dashboard/review', '/dashboard/okr-table']
+    routes: ['/dashboard/executive', '/dashboard/domain', '/dashboard/review', '/dashboard/notifications', '/dashboard/okr-table']
   },
   {
     group: '목표/이니셔티브',
@@ -76,7 +81,7 @@ const MENU = [
   },
   {
     group: '관리',
-    routes: ['/admin/presets', '/admin/notifications', '/admin/logs']
+    routes: ['/admin/presets', '/admin/logs']
   }
 ];
 
@@ -96,10 +101,29 @@ const state = {
     aarrrTag: '',
     status: ''
   },
+  experimentFilters: {
+    owner: '',
+    startMonth: '',
+    endMonth: ''
+  },
   selectedKrId: null,
+  selectedSubKrId: null,
   selectedObjectiveId: null,
   selectedInitiativeId: null,
   searchQuery: '',
+  notificationMonthFilter: '',
+  notificationStatusFilter: 'all',
+  notificationRange: {
+    preset: 'all',
+    from: '',
+    to: ''
+  },
+  experimentRange: {
+    preset: 'all',
+    from: '',
+    to: ''
+  },
+  _notificationFiltersBackup: null,
   tablePage: 1,
   tablePageSize: 20,
   experimentPage: 1,
@@ -112,13 +136,16 @@ const state = {
 const el = {
   appShell: document.querySelector('.app-shell'),
   sidebar: document.querySelector('.sidebar'),
+  btnBrandHome: document.getElementById('btnBrandHome'),
   brandEyebrow: document.getElementById('brandEyebrow'),
   brandSub: document.getElementById('brandSub'),
   navTree: document.getElementById('navTree'),
   btnSidebarToggle: document.getElementById('btnSidebarToggle'),
+  pageBreadcrumb: document.getElementById('pageBreadcrumb'),
   pageTitle: document.getElementById('pageTitle'),
   pageDesc: document.getElementById('pageDesc'),
   topbarActions: document.getElementById('topbarActions'),
+  filterChipRows: document.getElementById('filterChipRows'),
   pageContent: document.getElementById('pageContent'),
   searchKeyword: document.getElementById('searchKeyword'),
   btnSearch: document.getElementById('btnSearch'),
@@ -127,6 +154,11 @@ const el = {
   filterTeam: document.getElementById('filterTeam'),
   filterAarrr: document.getElementById('filterAarrr'),
   filterStatus: document.getElementById('filterStatus'),
+  filterOwner: document.getElementById('filterOwner'),
+  filterExperimentStartMonth: document.getElementById('filterExperimentStartMonth'),
+  filterExperimentEndMonth: document.getElementById('filterExperimentEndMonth'),
+  filterNotificationMonth: document.getElementById('filterNotificationMonth'),
+  filterNotificationStatus: document.getElementById('filterNotificationStatus'),
   btnApplyFilters: document.getElementById('btnApplyFilters'),
   btnResetFilters: document.getElementById('btnResetFilters'),
   layerModal: document.getElementById('layerModal'),
@@ -167,11 +199,11 @@ const OKR_STATUS_META = {
 };
 
 const EXPERIMENT_STATUS_META = {
-  before_start: { label: 'before start', tone: 'before-start' },
-  in_progress: { label: 'in progress', tone: 'in-progress' },
-  winner_selected: { label: 'winner selected', tone: 'winner' },
-  ended: { label: 'ended', tone: 'ended' },
-  discarded: { label: 'discarded', tone: 'discarded' }
+  before_start: { label: 'Ready to Start', tone: 'before-start' },
+  in_progress: { label: 'Running', tone: 'in-progress' },
+  winner_selected: { label: 'Ready to Review', tone: 'winner' },
+  ended: { label: 'Concluded', tone: 'ended' },
+  discarded: { label: 'Closed', tone: 'discarded' }
 };
 
 const STATUS_META = {
@@ -196,10 +228,32 @@ const STATUS_META = {
 const OKR_STATUS_OPTIONS = Object.keys(OKR_STATUS_META);
 const EXPERIMENT_STATUS_OPTIONS = Object.keys(EXPERIMENT_STATUS_META);
 const EXPERIMENT_RESULT_OPTIONS = ['위너 선정 전', '대조군(A) 위너 선정', '실험군(B) 위너 선정'];
+const INPUT_SOURCE_STATUS_OPTIONS = ['registered', 'converted', 'rejected'];
+
+function uniqueOrdered(values) {
+  const seen = new Set();
+  const result = [];
+  values.forEach((value) => {
+    const key = String(value || '').trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(key);
+  });
+  return result;
+}
 
 function statusOptionLabel(value) {
   const key = String(value || '').trim().toLowerCase();
   const meta = STATUS_META[key];
+  if (key === 'green' || key === 'yellow' || key === 'red') {
+    const signal = SIGNAL_META[key];
+    if (signal) return `${signal.emoji} ${signal.label}`;
+  }
+  if (key === 'before_start') return 'Ready to Start';
+  if (key === 'in_progress') return 'Running';
+  if (key === 'winner_selected') return 'Ready to Review';
+  if (key === 'ended') return 'Concluded';
+  if (key === 'discarded') return 'Closed';
   if (meta) return meta.label;
   return String(value || '-').replaceAll('_', ' ');
 }
@@ -212,7 +266,45 @@ function statusOptionsHtml(options, selectedValue) {
       const selectedAttr = key === selected ? 'selected' : '';
       return `<option value="${esc(key)}" ${selectedAttr}>${esc(statusOptionLabel(key))}</option>`;
     })
+      .join('');
+}
+
+function normalizeMonth(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/(\d{4})-(\d{1,2})/);
+  if (!match) return '';
+  const year = match[1];
+  const month = String(match[2]).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function monthSelectOptions(values, selectedValue) {
+  const selected = String(selectedValue || '').trim();
+  const options = uniqueOrdered(values.map((value) => normalizeMonth(value)).filter(Boolean))
+    .map((month) => {
+      const selectedAttr = month === selected ? 'selected' : '';
+      return `<option value="${esc(month)}" ${selectedAttr}>${esc(month)}</option>`;
+    })
     .join('');
+  return `<option value="">전체</option>${options}`;
+}
+
+function routeStatusFilterOptions() {
+  if (isNotificationRoute()) return [];
+  if (isExperimentRoute()) return EXPERIMENT_STATUS_OPTIONS;
+  if (state.route === '/input/sources') return INPUT_SOURCE_STATUS_OPTIONS;
+  if (state.route === '/dashboard/okr-table') return uniqueOrdered([...OKR_STATUS_OPTIONS, ...Object.keys(SIGNAL_META)]);
+  if (state.route === '/dashboard/executive' || state.route === '/dashboard/domain' || state.route === '/dashboard/review') {
+    return uniqueOrdered([...OKR_STATUS_OPTIONS, ...Object.keys(SIGNAL_META)]);
+  }
+  if (
+    state.route === '/goals/objectives' ||
+    state.route === '/goals/krs' ||
+    state.route === '/goals/initiatives'
+  ) {
+    return OKR_STATUS_OPTIONS;
+  }
+  return [];
 }
 
 function normalizeExperimentResultValue(value, status) {
@@ -248,6 +340,14 @@ function signalBadge(signal) {
   const meta = SIGNAL_META[key];
   if (!meta) return '<span class="badge status">⚪ 미정</span>';
   return `<span class="badge signal-${esc(key)}">${meta.emoji} ${meta.label}</span>`;
+}
+
+function signalFromValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'red';
+  if (numeric >= 80) return 'green';
+  if (numeric >= 50) return 'yellow';
+  return 'red';
 }
 
 function statusBadge(status) {
@@ -327,6 +427,14 @@ function globalQuery(extra = {}) {
   const source = {
     ...state.filters,
     ...(state.searchQuery ? { q: state.searchQuery } : {}),
+    ...(isNotificationRoute()
+      ? {
+          ...(state.notificationStatusFilter && state.notificationStatusFilter !== 'all'
+            ? { status: state.notificationStatusFilter }
+            : {}),
+          ...(state.notificationMonthFilter ? { yearMonth: state.notificationMonthFilter } : {})
+        }
+      : {}),
     ...extra
   };
 
@@ -338,6 +446,327 @@ function globalQuery(extra = {}) {
 
   const query = params.toString();
   return query ? `?${query}` : '';
+}
+
+function isNotificationRoute() {
+  return state.route === '/dashboard/notifications' || state.route === '/admin/notifications';
+}
+
+function isExperimentRoute() {
+  return state.route === '/goals/experiments';
+}
+
+function setFilterStatusOptions() {
+  if (!el.filterStatus) return;
+  const allowedStatus = routeStatusFilterOptions();
+  const current = String(state.filters.status || '').trim().toLowerCase();
+  const normalized = allowedStatus.includes(current) ? current : '';
+  state.filters.status = normalized;
+  el.filterStatus.innerHTML = `<option value="">전체</option>${statusOptionsHtml(allowedStatus, normalized)}`;
+  el.filterStatus.value = normalized;
+}
+
+function notificationMonthFilterOptions() {
+  const now = new Date();
+  const options = ['<option value=\"\">전체</option>'];
+  for (let i = 0; i < 12; i += 1) {
+    const target = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`;
+    const selected = state.notificationMonthFilter === value ? ' selected' : '';
+    options.push(`<option value="${value}"${selected}>${value}</option>`);
+  }
+  return options.join('');
+}
+
+function parseDateOnly(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const normalized = /^\d{4}-\d{2}$/.test(raw) ? `${raw}-01` : raw;
+  const date = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function formatDateOnly(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function buildRangeByPreset(preset) {
+  const key = String(preset || 'all').trim();
+  if (key === 'all') return { from: '', to: '' };
+  const today = new Date();
+  const to = formatDateOnly(today);
+  const fromDate = new Date(today);
+  if (key === '1w') {
+    fromDate.setDate(fromDate.getDate() - 6);
+  } else if (key === '1m') {
+    fromDate.setMonth(fromDate.getMonth() - 1);
+  } else if (key === '3m') {
+    fromDate.setMonth(fromDate.getMonth() - 3);
+  } else {
+    return { from: '', to: '' };
+  }
+  return { from: formatDateOnly(fromDate), to };
+}
+
+function inDateRange(value, range) {
+  const source = parseDateOnly(value);
+  if (!source) return true;
+  const from = parseDateOnly(range?.from);
+  const to = parseDateOnly(range?.to);
+  if (from && source < from) return false;
+  if (to && source > to) return false;
+  return true;
+}
+
+function getRouteRangeFilter() {
+  if (isNotificationRoute()) return state.notificationRange;
+  if (isExperimentRoute()) return state.experimentRange;
+  return { preset: 'all', from: '', to: '' };
+}
+
+function selectOptions(selectEl) {
+  if (!selectEl) return [];
+  return Array.from(selectEl.options || [])
+    .map((option) => ({
+      value: String(option.value || ''),
+      label: String(option.textContent || '').trim()
+    }))
+    .filter((option) => option.label);
+}
+
+function renderFilterChipRows() {
+  if (!el.filterChipRows) return;
+
+  const notificationRoute = isNotificationRoute();
+  const experimentRoute = isExperimentRoute();
+  const managementRoute = state.route === '/admin/presets' || state.route === '/admin/logs';
+
+  if (managementRoute) {
+    el.filterChipRows.classList.add('hidden');
+    el.filterChipRows.innerHTML = '';
+    return;
+  }
+
+  const rows = [];
+
+  if (!notificationRoute && !experimentRoute) {
+    const domainOptions = selectOptions(el.filterDomain).filter((item) => item.value);
+    if (domainOptions.length) {
+      const activeDomain = String(state.filters.domain || '');
+      rows.push(`
+        <div class="filter-chip-row category">
+          <label>카테고리</label>
+          <div class="filter-chip-group">
+            <button type="button" class="filter-chip ${activeDomain === '' ? 'active' : ''}" data-chip-kind="domain" data-chip-value="">전체</button>
+            ${domainOptions
+              .map((item) => `<button type="button" class="filter-chip ${activeDomain === item.value ? 'active' : ''}" data-chip-kind="domain" data-chip-value="${esc(item.value)}">${esc(item.label)}</button>`)
+              .join('')}
+          </div>
+        </div>
+      `);
+    }
+  }
+
+  if (notificationRoute || experimentRoute) {
+    const range = getRouteRangeFilter();
+    const preset = String(range?.preset || 'all');
+    rows.push(`
+      <div class="filter-chip-row period">
+        <label>기간</label>
+        <div class="filter-chip-group period-wrap">
+          <div class="filter-chip-group period">
+            <button type="button" class="filter-chip period ${preset === 'all' ? 'active' : ''}" data-chip-kind="period" data-chip-value="all">전체</button>
+            <button type="button" class="filter-chip period ${preset === '1w' ? 'active' : ''}" data-chip-kind="period" data-chip-value="1w">1주일</button>
+            <button type="button" class="filter-chip period ${preset === '1m' ? 'active' : ''}" data-chip-kind="period" data-chip-value="1m">1개월</button>
+            <button type="button" class="filter-chip period ${preset === '3m' ? 'active' : ''}" data-chip-kind="period" data-chip-value="3m">3개월</button>
+            <button type="button" class="filter-chip period ${preset === 'custom' ? 'active' : ''}" data-chip-kind="period" data-chip-value="custom">직접입력</button>
+          </div>
+          <div class="filter-date-range ${preset === 'custom' ? '' : 'hidden'}">
+            <input id="periodFromDate" type="date" value="${esc(range?.from || '')}" />
+            <span>~</span>
+            <input id="periodToDate" type="date" value="${esc(range?.to || '')}" />
+            <button type="button" class="btn secondary period-apply-btn" data-chip-kind="period-custom-apply">적용</button>
+          </div>
+        </div>
+      </div>
+    `);
+  }
+
+  if (!rows.length) {
+    el.filterChipRows.classList.add('hidden');
+    el.filterChipRows.innerHTML = '';
+    return;
+  }
+
+  el.filterChipRows.classList.remove('hidden');
+  el.filterChipRows.innerHTML = rows.join('');
+
+  el.filterChipRows.querySelectorAll('[data-chip-kind="domain"]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = String(button.dataset.chipValue || '');
+      state.filters.domain = value;
+      if (el.filterDomain) el.filterDomain.value = value;
+      state.tablePage = 1;
+      state.experimentPage = 1;
+      await renderCurrentRoute();
+    });
+  });
+
+  el.filterChipRows.querySelectorAll('[data-chip-kind="period"]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = String(button.dataset.chipValue || 'all');
+      const targetRange = notificationRoute ? state.notificationRange : state.experimentRange;
+      if (value === 'custom') {
+        targetRange.preset = 'custom';
+        renderFilterChipRows();
+        return;
+      }
+      const range = buildRangeByPreset(value);
+      targetRange.preset = value;
+      targetRange.from = range.from;
+      targetRange.to = range.to;
+      if (notificationRoute) {
+        if (value === 'all') {
+          state.notificationMonthFilter = '';
+          if (el.filterNotificationMonth) el.filterNotificationMonth.value = '';
+        }
+      } else {
+        if (value === 'all') {
+          state.experimentFilters.startMonth = '';
+          state.experimentFilters.endMonth = '';
+          if (el.filterExperimentStartMonth) el.filterExperimentStartMonth.value = '';
+          if (el.filterExperimentEndMonth) el.filterExperimentEndMonth.value = '';
+        }
+      }
+      state.tablePage = 1;
+      state.experimentPage = 1;
+      await renderCurrentRoute();
+    });
+  });
+
+  const customApply = el.filterChipRows.querySelector('[data-chip-kind="period-custom-apply"]');
+  if (customApply) {
+    customApply.addEventListener('click', async () => {
+      const fromValue = String(el.filterChipRows.querySelector('#periodFromDate')?.value || '');
+      const toValue = String(el.filterChipRows.querySelector('#periodToDate')?.value || '');
+      if (!fromValue || !toValue) {
+        showToast('직접입력 기간의 시작일과 종료일을 선택해 주세요.', true);
+        return;
+      }
+      if (fromValue > toValue) {
+        showToast('시작일은 종료일보다 늦을 수 없습니다.', true);
+        return;
+      }
+      const targetRange = notificationRoute ? state.notificationRange : state.experimentRange;
+      targetRange.preset = 'custom';
+      targetRange.from = fromValue;
+      targetRange.to = toValue;
+      state.tablePage = 1;
+      state.experimentPage = 1;
+      await renderCurrentRoute();
+    });
+  }
+}
+
+function syncRouteFilterUI() {
+  const notificationRoute = isNotificationRoute();
+  const experimentRoute = isExperimentRoute();
+  const managementRoute = state.route === '/admin/presets' || state.route === '/admin/logs';
+  const divisionRow = el.filterDivision?.closest('div');
+  const domainRow = el.filterDomain?.closest('div');
+  const teamRow = el.filterTeam?.closest('div');
+  const aarrrRow = el.filterAarrr?.closest('div');
+  const statusRow = el.filterStatus?.closest('div');
+  const ownerRow = el.filterOwner?.closest('div');
+  const experimentStartRow = el.filterExperimentStartMonth?.closest('div');
+  const experimentEndRow = el.filterExperimentEndMonth?.closest('div');
+  const notificationMonthRow = el.filterNotificationMonth?.closest('div');
+  const notificationStatusRow = el.filterNotificationStatus?.closest('div');
+  const filterActionsRow = document.querySelector('.filter-actions');
+  const divisionLabel = el.filterDivision?.closest('div')?.querySelector('label');
+  const searchToolbar = document.querySelector('.search-toolbar');
+  const filterGrid = document.querySelector('.filter-grid');
+  const filterPanel = document.querySelector('.filter-panel');
+
+  const show = (node, visible) => {
+    if (!node) return;
+    node.style.display = visible ? '' : 'none';
+  };
+
+  show(filterPanel, !managementRoute);
+  show(searchToolbar, !managementRoute);
+  show(filterGrid, !managementRoute);
+  show(divisionRow, !notificationRoute);
+  show(teamRow, !notificationRoute && !experimentRoute);
+  show(domainRow, !notificationRoute && !experimentRoute);
+  show(aarrrRow, !notificationRoute && !experimentRoute);
+  show(statusRow, !notificationRoute);
+  show(ownerRow, !notificationRoute && experimentRoute);
+  show(experimentStartRow, !notificationRoute && experimentRoute);
+  show(experimentEndRow, !notificationRoute && experimentRoute);
+  show(notificationMonthRow, false);
+  show(notificationStatusRow, notificationRoute);
+
+  if (notificationRoute) {
+    if (!state._notificationFiltersBackup) {
+      state._notificationFiltersBackup = { ...state.filters };
+    }
+    state.filters = {
+      ...state.filters,
+      division: '',
+      domain: '',
+      team: '',
+      aarrrTag: '',
+      status: ''
+    };
+  } else if (state._notificationFiltersBackup) {
+    state.filters = { ...state._notificationFiltersBackup };
+    state._notificationFiltersBackup = null;
+  }
+
+  if (experimentRoute && divisionLabel) {
+    divisionLabel.textContent = '조직';
+  } else if (divisionLabel) {
+    divisionLabel.textContent = '실';
+  }
+
+  if (el.filterNotificationMonth) {
+    el.filterNotificationMonth.innerHTML = notificationMonthFilterOptions();
+  }
+
+  if (el.filterNotificationStatus) {
+    el.filterNotificationStatus.innerHTML = `
+      <option value="all">전체</option>
+      <option value="registered" ${state.notificationStatusFilter === 'registered' ? 'selected' : ''}>실적 등록</option>
+      <option value="missing" ${state.notificationStatusFilter === 'missing' ? 'selected' : ''}>미등록</option>
+    `;
+  }
+
+  if (filterActionsRow) {
+    filterActionsRow.style.order = experimentRoute ? '999' : '';
+  }
+
+  if (statusRow) {
+    statusRow.style.order = experimentRoute ? '998' : '';
+  }
+  if (ownerRow) {
+    ownerRow.style.order = experimentRoute ? '1' : '';
+  }
+  if (experimentStartRow) {
+    experimentStartRow.style.order = experimentRoute ? '2' : '';
+  }
+  if (experimentEndRow) {
+    experimentEndRow.style.order = experimentRoute ? '3' : '';
+  }
+
+  setFilterStatusOptions();
+  applyStateToFilterInputs();
+  renderFilterChipRows();
 }
 
 function isSignalStatus(status) {
@@ -416,7 +845,7 @@ async function confirmDeleteAndRefresh({ path, label, reason, actor = 'pm.demo',
   return true;
 }
 
-function openLayerModal({ title, description, bodyHtml, submitLabel, onSubmit }) {
+function openLayerModal({ title, description, bodyHtml, submitLabel, onSubmit, showCancel = true, extraAction = null }) {
   if (!el.layerModal) return;
   closeLayerModal();
 
@@ -433,7 +862,8 @@ function openLayerModal({ title, description, bodyHtml, submitLabel, onSubmit })
       <form id="layerForm" class="form-grid">
         ${bodyHtml}
         <div class="layer-actions">
-          <button class="btn secondary" type="button" data-layer-close="true">취소</button>
+          ${extraAction ? `<button class="btn ${esc(extraAction.variant || 'ghost')}" type="button" data-layer-extra="true">${esc(extraAction.label || '추가')}</button>` : ''}
+          ${showCancel ? '<button class="btn secondary" type="button" data-layer-close="true">취소</button>' : ''}
           <button class="btn" type="submit">${esc(submitLabel || '저장')}</button>
         </div>
       </form>
@@ -469,6 +899,19 @@ function openLayerModal({ title, description, bodyHtml, submitLabel, onSubmit })
       } catch (err) {
         showToast(err.message, true);
         if (submitButton) submitButton.disabled = false;
+      }
+    });
+  }
+
+  const extraButton = el.layerModal.querySelector('[data-layer-extra="true"]');
+  if (extraButton && extraAction && typeof extraAction.onClick === 'function') {
+    extraButton.addEventListener('click', async () => {
+      extraButton.disabled = true;
+      try {
+        await extraAction.onClick(form);
+      } catch (err) {
+        showToast(err.message, true);
+        extraButton.disabled = false;
       }
     });
   }
@@ -1233,6 +1676,22 @@ function openExperimentModal({
     title: isEdit ? 'Experiment 수정' : 'Experiment 등록',
     description: '상위 목표를 하나 선택한 뒤 실험 플랫폼에서 제목을 불러옵니다.',
     submitLabel: isEdit ? '수정 저장' : '등록',
+    extraAction: isEdit
+      ? {
+          label: '삭제',
+          variant: 'ghost',
+          onClick: async () => {
+            const deleted = await confirmDeleteAndRefresh({
+              path: `/api/experiments/${encodeURIComponent(experiment.id)}`,
+              label: experiment.title || 'Experiment',
+              reason: 'delete experiment from edit modal'
+            });
+            if (deleted) {
+              closeLayerModal();
+            }
+          }
+        }
+      : null,
     bodyHtml: `
       <div class="field-row">
         <label for="layerExperimentTargetRef">상위 목표</label>
@@ -1328,6 +1787,17 @@ function bindSidebarToggle() {
   });
 }
 
+function bindBrandHome() {
+  if (!el.btnBrandHome) return;
+  const goExecutive = () => navigate('/dashboard/executive');
+  el.btnBrandHome.addEventListener('click', goExecutive);
+  el.btnBrandHome.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    goExecutive();
+  });
+}
+
 function restoreSidebarState() {
   let collapsed = false;
   try {
@@ -1342,18 +1812,43 @@ function applyFilterInputsToState() {
   state.searchQuery = String(el.searchKeyword?.value || '').trim();
   state.filters.division = el.filterDivision.value;
   state.filters.domain = el.filterDomain.value;
-  state.filters.team = el.filterTeam.value;
+  state.filters.team = isExperimentRoute() ? state.filters.team || '' : el.filterTeam.value;
   state.filters.aarrrTag = el.filterAarrr.value;
   state.filters.status = el.filterStatus.value;
+  state.experimentFilters.owner = isExperimentRoute() ? el.filterOwner.value : '';
+  state.experimentFilters.startMonth = isExperimentRoute() ? el.filterExperimentStartMonth.value : '';
+  state.experimentFilters.endMonth = isExperimentRoute() ? el.filterExperimentEndMonth.value : '';
+  if (isNotificationRoute() && el.filterNotificationMonth) {
+    state.notificationMonthFilter = String(el.filterNotificationMonth.value || '').trim();
+    state.notificationStatusFilter = String(el.filterNotificationStatus?.value || 'all').trim();
+  }
 }
 
 function applyStateToFilterInputs() {
   if (el.searchKeyword) el.searchKeyword.value = state.searchQuery;
   el.filterDivision.value = state.filters.division;
   el.filterDomain.value = state.filters.domain;
-  el.filterTeam.value = state.filters.team;
+  if (!isExperimentRoute()) {
+    el.filterTeam.value = state.filters.team;
+  }
   el.filterAarrr.value = state.filters.aarrrTag;
   el.filterStatus.value = state.filters.status;
+  if (el.filterOwner) {
+    el.filterOwner.value = isExperimentRoute() ? state.experimentFilters.owner : '';
+  }
+  if (el.filterExperimentStartMonth) {
+    el.filterExperimentStartMonth.value = isExperimentRoute() ? state.experimentFilters.startMonth : '';
+  }
+  if (el.filterExperimentEndMonth) {
+    el.filterExperimentEndMonth.value = isExperimentRoute() ? state.experimentFilters.endMonth : '';
+  }
+  if (el.filterNotificationMonth) {
+    el.filterNotificationMonth.value = state.notificationMonthFilter || '';
+  }
+  if (el.filterNotificationStatus) {
+    el.filterNotificationStatus.value = state.notificationStatusFilter || 'all';
+  }
+  renderFilterChipRows();
 }
 
 function currentRoute() {
@@ -1399,12 +1894,111 @@ function renderNav() {
 
 async function hydrateTaxonomy() {
   try {
-    const taxonomy = await fetchJSON('/api/admin/taxonomy');
     const selectedDivision = state.filters.division;
     const selectedDomain = state.filters.domain;
     const selectedTeam = state.filters.team;
     const selectedAarrr = state.filters.aarrrTag;
+    const selectedOwner = state.experimentFilters.owner;
+    const selectedStartMonth = state.experimentFilters.startMonth;
+    const selectedEndMonth = state.experimentFilters.endMonth;
 
+    if (isExperimentRoute()) {
+      const [experiments, krLinks, initiativeLinks, krs, initiatives, platformExperiments] = await Promise.all([
+        fetchJSON('/api/experiments').catch(() => []),
+        fetchJSON('/api/kr-experiment-links').catch(() => []),
+        fetchJSON('/api/initiative-experiment-links').catch(() => []),
+        fetchJSON('/api/krs').catch(() => []),
+        fetchJSON('/api/initiatives').catch(() => []),
+        fetchJSON('/api/experiment-platform/experiments').catch(() => [])
+      ]);
+
+      const krMap = new Map(krs.map((item) => [item.id, item]));
+      const initiativeMap = new Map(initiatives.map((item) => [item.id, item]));
+      const krByExperiment = new Map();
+      const initiativeByExperiment = new Map();
+      const divisionSet = new Set();
+      const teamSet = new Set();
+      const ownerSet = new Set();
+      const startMonthSet = new Set();
+      const endMonthSet = new Set();
+      const platformById = new Map((platformExperiments || []).map((item) => [String(item.id || ''), item]));
+      const findPlatformOwner = (experiment) => {
+        if (!experiment || !platformById.size) return '';
+        const byId = platformById.get(String(experiment.platformExperimentId || ''));
+        const candidate = byId || (platformExperiments || []).find((item) => String(item.title || '') === String(experiment.title || ''));
+        if (!candidate) return '';
+        return String(candidate.owner || candidate.assignee || candidate.manager || '').trim();
+      };
+
+      krLinks.forEach((link) => {
+        const list = krByExperiment.get(link.experimentId) || [];
+        list.push(link);
+        krByExperiment.set(link.experimentId, list);
+
+        const kr = krMap.get(link.krId);
+        if (kr) {
+          if (kr.division) divisionSet.add(String(kr.division).trim());
+          if (kr.team) teamSet.add(String(kr.team).trim());
+          if (kr.owner) ownerSet.add(String(kr.owner).trim());
+        }
+      });
+
+      initiativeLinks.forEach((link) => {
+        const list = initiativeByExperiment.get(link.experimentId) || [];
+        list.push(link);
+        initiativeByExperiment.set(link.experimentId, list);
+
+        const initiative = initiativeMap.get(link.initiativeId);
+        if (initiative) {
+          if (initiative.division) divisionSet.add(String(initiative.division).trim());
+          if (initiative.team) teamSet.add(String(initiative.team).trim());
+          if (initiative.owner) ownerSet.add(String(initiative.owner).trim());
+        }
+      });
+
+      experiments.forEach((experiment) => {
+        if (experiment.owner) ownerSet.add(String(experiment.owner).trim());
+        const platformOwner = findPlatformOwner(experiment);
+        if (platformOwner) ownerSet.add(platformOwner);
+        const month = normalizeMonth(experiment.startDate);
+        if (month) startMonthSet.add(month);
+        const endMonth = normalizeMonth(experiment.endDate);
+        if (endMonth) endMonthSet.add(endMonth);
+      });
+
+      const divisionOptions = [...divisionSet]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+        .map((item) => `<option value="division::${esc(item)}">실 · ${esc(item)}</option>`)
+        .join('');
+      const teamOptions = [...teamSet]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+        .map((item) => `<option value="team::${esc(item)}">팀 · ${esc(item)}</option>`)
+        .join('');
+      const ownerOptions = [...ownerSet]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+        .map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)
+        .join('');
+      const startMonthOptions = monthSelectOptions(startMonthSet, selectedStartMonth);
+      const endMonthOptions = monthSelectOptions(endMonthSet, selectedEndMonth);
+
+      el.filterDivision.innerHTML = `<option value="">전체</option>${divisionOptions}${teamOptions}`;
+      el.filterTeam.innerHTML = `<option value="">전체</option>`;
+      el.filterOwner.innerHTML = `<option value="">전체</option>${ownerOptions}`;
+      el.filterExperimentStartMonth.innerHTML = startMonthOptions;
+      el.filterExperimentEndMonth.innerHTML = endMonthOptions;
+
+      if (selectedDivision) el.filterDivision.value = selectedDivision;
+      if (selectedOwner) el.filterOwner.value = selectedOwner;
+      if (selectedStartMonth) el.filterExperimentStartMonth.value = selectedStartMonth;
+      if (selectedEndMonth) el.filterExperimentEndMonth.value = selectedEndMonth;
+      renderFilterChipRows();
+      return;
+    }
+
+    const taxonomy = await fetchJSON('/api/admin/taxonomy');
     const divisionOptions = taxonomy.divisions
       .map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)
       .join('');
@@ -1427,15 +2021,29 @@ async function hydrateTaxonomy() {
     if (selectedDomain) el.filterDomain.value = selectedDomain;
     if (selectedTeam) el.filterTeam.value = selectedTeam;
     if (selectedAarrr) el.filterAarrr.value = selectedAarrr;
+    if (el.filterOwner) el.filterOwner.value = '';
+    if (el.filterExperimentStartMonth) el.filterExperimentStartMonth.value = '';
+    if (el.filterExperimentEndMonth) el.filterExperimentEndMonth.value = '';
+    renderFilterChipRows();
   } catch (_err) {
     // keep default options
+    renderFilterChipRows();
   }
 }
 
 function setPageHeader() {
   const meta = ROUTES[state.route];
-  el.pageTitle.textContent = meta.title;
+  const crumbs = String(meta.title || '')
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const pageTitle = crumbs[crumbs.length - 1] || meta.title;
+  if (el.pageBreadcrumb) {
+    el.pageBreadcrumb.textContent = crumbs.join(' > ');
+  }
+  el.pageTitle.textContent = pageTitle;
   el.pageDesc.textContent = meta.desc;
+  document.title = `${meta.title} | 배민 OKR 어드민`;
 }
 
 async function onTopbarCreateObjective() {
@@ -1510,6 +2118,7 @@ async function renderCurrentRoute() {
   if (!meta) {
     state.route = '/dashboard/executive';
   }
+  syncRouteFilterUI();
 
   setPageHeader();
   renderTopbarActions();
@@ -1540,44 +2149,120 @@ async function renderExecutive() {
   const data = await fetchJSON(`/api/dashboard/executive${globalQuery()}`);
 
   const summary = data.summary;
-  const contributors = data.topContributors || [];
   const risks = data.riskKrs || [];
+  const organizationRows = data.organizationRows || [];
+  const topPerformers = data.topPerformers || [];
+  const experimentWinRate = data.experimentWinRate || { winnerRate: 0, winnerExperimentCount: 0, totalExperimentCount: 0 };
+  const notificationPreview = data.notifications || [];
+  const topNotificationCount = 5;
+  const signalPriority = (value) => {
+    if (value === 'red') return 0;
+    if (value === 'yellow') return 1;
+    return 2;
+  };
+  const orderedOrganizations = [...organizationRows]
+    .sort((a, b) => {
+      const aSignal = signalPriority(String(a.status || '').toLowerCase());
+      const bSignal = signalPriority(String(b.status || '').toLowerCase());
+      if (aSignal !== bSignal) return aSignal - bSignal;
+      return Number(a.achievement || 0) - Number(b.achievement || 0);
+    })
+    .slice(0, 3);
+  const orderedTopPerformers = [...topPerformers].slice(0, 5);
 
   el.pageContent.innerHTML = `
     ${dashboardQuickActions()}
     <section class="card panel">
-      <div class="grid-3">
+      <div class="grid-4">
         <article class="stat"><p class="k">Objectives</p><p class="v">${summary.objectiveCount}</p></article>
         <article class="stat"><p class="k">KRs</p><p class="v">${summary.krCount}</p></article>
-        <article class="stat"><p class="k">Avg Achievement (KR)</p><p class="v">${fmtNumber(summary.avgAchievement)}%</p></article>
-      </div>
-      <div class="grid-3" style="margin-top:12px;">
         <article class="stat"><p class="k">Sub-KRs</p><p class="v">${summary.subKrCount ?? 0}</p></article>
         <article class="stat"><p class="k">Initiatives</p><p class="v">${summary.initiativeCount ?? 0}</p></article>
+      </div>
+      <div class="grid-4" style="margin-top:12px;">
+        <article class="stat"><p class="k">AVG Achievement</p><p class="v">${fmtNumber(summary.avgAchievement)}%</p></article>
+        <article class="stat"><p class="k">monthly update</p><p class="v">${fmtNumber(summary.updateRate)}%</p></article>
         <article class="stat"><p class="k">Experiments</p><p class="v">${summary.experimentCount}</p></article>
+        <article class="stat"><p class="k">TG Win ratio</p><p class="v">${fmtNumber(experimentWinRate.winnerRate)}%</p></article>
       </div>
     </section>
 
-    <section class="grid-2">
+    <section class="grid-3">
       <article class="card panel">
-        <h3>Signal Distribution</h3>
-        <div class="grid-3">
-          <div class="stat"><p class="k">${signalText('green')}</p><p class="v">${summary.signal.green}</p></div>
-          <div class="stat"><p class="k">${signalText('yellow')}</p><p class="v">${summary.signal.yellow}</p></div>
-          <div class="stat"><p class="k">${signalText('red')}</p><p class="v">${summary.signal.red}</p></div>
+        <div class="section-head-inline">
+          <h3>Notifications Preview</h3>
+          <button type="button" class="section-link" data-route-link="/dashboard/notifications" aria-label="알림 전체 보기">›</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>대상명</th><th>미입력 월</th><th>상태</th></tr></thead>
+            <tbody>
+              ${notificationPreview.length === 0
+      ? '<tr><td colspan="3">알림 데이터가 없습니다.</td></tr>'
+      : notificationPreview
+          .slice(0, topNotificationCount)
+          .map(
+            (item) => `<tr>
+                <td>${esc(item.targetTitle || '-')}</td>
+                <td>${esc(item.yearMonth || '-')}</td>
+                <td><span class="badge ${esc(item.__status === 'registered' ? 'status' : 'danger')}">${esc(item.__status === 'registered' ? '실적 등록' : item.__status === 'missing' ? '미등록' : '-')}</span></td>
+              </tr>`
+          )
+          .join('')}
+            </tbody>
+          </table>
         </div>
       </article>
 
       <article class="card panel">
-        <h3>Top Contributors</h3>
-        ${contributors.length === 0 ? '<div class="empty">기여 실험 데이터가 없습니다.</div>' : `
+        <div class="section-head-inline">
+          <h3>Top Performing Division/Team</h3>
+        </div>
+        ${orderedTopPerformers.length === 0
+      ? '<div class="empty">기준 대상이 없습니다.</div>'
+      : `
           <div class="table-wrap">
             <table class="data-table">
-              <thead><tr><th>Experiment</th><th>Total Contribution</th></tr></thead>
+	              <thead><tr><th>조직</th><th>업데이트율</th><th>월간 추세</th></tr></thead>
               <tbody>
-                ${contributors
+                ${orderedTopPerformers
                   .map(
-                    (item) => `<tr><td>${esc(item.experimentTitle)}</td><td>${fmtNumber(item.totalContribution)}</td></tr>`
+                    (row) => `<tr>
+                      <td>${esc(row.organizationName || '-')}</td>
+                      <td>${fmtNumber(row.completionRate || 0)}%</td>
+                      <td>${fmtNumber(row.monthDelta || 0)}%</td>
+                    </tr>`
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </article>
+
+      <article class="card panel">
+        <div class="section-head-inline">
+          <h3>Signal Distribution</h3>
+          <button type="button" class="section-link" data-route-link="/dashboard/domain" aria-label="도메인 대시보드로 이동">›</button>
+        </div>
+        <div class="grid-3 compact-stat-grid" style="margin-bottom:12px;">
+          <article class="stat stat-mini"><p class="k">${signalText('green')}</p><p class="v">${summary.signal.green}</p></article>
+          <article class="stat stat-mini"><p class="k">${signalText('yellow')}</p><p class="v">${summary.signal.yellow}</p></article>
+          <article class="stat stat-mini"><p class="k">${signalText('red')}</p><p class="v">${summary.signal.red}</p></article>
+        </div>
+        <h3 style="margin-top:8px;">조직별 상태</h3>
+        ${orderedOrganizations.length === 0 ? '<div class="empty">조직 상태 데이터가 없습니다.</div>' : `
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>조직명</th><th>상태</th><th>진척도</th></tr></thead>
+              <tbody>
+                ${orderedOrganizations
+                  .map(
+                    (row) => `<tr>
+                      <td>${esc(row.name || '-')}</td>
+                      <td>${signalBadge(row.status || 'red')}</td>
+                      <td>${fmtNumber(row.achievement || 0)}%</td>
+                    </tr>`
                   )
                   .join('')}
               </tbody>
@@ -1588,23 +2273,28 @@ async function renderExecutive() {
     </section>
 
     <section class="card panel">
-      <h3>Risk KR (Review Priority)</h3>
-      ${risks.length === 0 ? '<div class="empty">리스크 KR이 없습니다.</div>' : `
+      <div class="section-head-inline">
+        <h3>Risk KR / Sub-KR / Initiative (Review Priority)</h3>
+        <button type="button" class="section-link" data-route-link="/dashboard/review" aria-label="리뷰 대시보드로 이동">›</button>
+      </div>
+      ${risks.length === 0 ? '<div class="empty">리스크 항목이 없습니다.</div>' : `
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>KR</th><th>실</th><th>도메인</th><th>Signal</th><th>Achievement</th><th></th></tr>
+              <tr><th>Type</th><th>대상</th><th>Objective</th><th>실</th><th>도메인</th><th>Signal</th><th>Achievement</th><th></th></tr>
             </thead>
             <tbody>
               ${risks
                 .map(
                   (item) => `<tr>
-                    <td>${esc(item.krTitle)}</td>
+                    <td>${esc(item.typeLabel || item.entityType || '-')}</td>
+                    <td>${esc(item.title || item.krTitle || '-')}</td>
+                    <td>${esc(item.objectiveTitle || '-')}</td>
                     <td>${esc(item.division || '-')}</td>
                     <td>${esc(item.domain || '-')}</td>
                     <td>${signalBadge(item.signal)}</td>
                     <td>${fmtNumber(item.achievement)}%</td>
-                    <td><button class="btn ghost" data-go-kr="${esc(item.krId)}">KR</button></td>
+                    <td><button class="btn ghost" data-go-entity="${esc(item.entityType || 'kr')}|${esc(item.krId || item.subKrId || item.initiativeId || '')}">이동</button></td>
                   </tr>`
                 )
                 .join('')}
@@ -1615,10 +2305,36 @@ async function renderExecutive() {
     </section>
   `;
 
-  el.pageContent.querySelectorAll('[data-go-kr]').forEach((button) => {
+  const goEntityButtons = el.pageContent.querySelectorAll('[data-go-entity]');
+  goEntityButtons.forEach((button) => {
     button.addEventListener('click', () => {
-      state.selectedKrId = button.dataset.goKr;
-      navigate('/goals/krs');
+      const raw = String(button.dataset.goEntity || '');
+      const [type, id] = raw.split('|');
+      if (type === 'kr') {
+        state.selectedKrId = id;
+        state.selectedSubKrId = null;
+        navigate('/goals/krs');
+        return;
+      }
+      if (type === 'sub_kr') {
+        const relatedKr = risks.find((item) => item.subKrId === id);
+        state.selectedKrId = relatedKr?.krId || state.selectedKrId || null;
+        state.selectedSubKrId = id;
+        navigate('/goals/krs');
+        return;
+      }
+      if (type === 'initiative') {
+        state.selectedInitiativeId = id;
+        state.selectedSubKrId = null;
+        navigate('/goals/initiatives');
+      }
+    });
+  });
+  const routeLinkButtons = el.pageContent.querySelectorAll('[data-route-link]');
+  routeLinkButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = String(button.dataset.routeLink || '').trim();
+      if (target) navigate(target);
     });
   });
   bindRouteJumpButtons();
@@ -1626,12 +2342,13 @@ async function renderExecutive() {
 
 async function renderDomain() {
   const rows = await fetchJSON(`/api/dashboard/domains${globalQuery()}`);
+  const orderedRows = [...rows].sort((a, b) => Number(a.avgAchievement || 0) - Number(b.avgAchievement || 0));
 
   el.pageContent.innerHTML = `
     ${dashboardQuickActions()}
     <section class="card panel">
       <h3>도메인별 View</h3>
-      ${rows.length === 0 ? '<div class="empty">해당 조건의 도메인 데이터가 없습니다.</div>' : `
+      ${orderedRows.length === 0 ? '<div class="empty">해당 조건의 도메인 데이터가 없습니다.</div>' : `
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -1640,18 +2357,22 @@ async function renderDomain() {
                 <th>Divisions</th>
                 <th>Objectives</th>
                 <th>KRs</th>
+                <th>Sub-KRs</th>
+                <th>Initiatives</th>
                 <th>Avg Achievement</th>
                 <th>Signals</th>
               </tr>
             </thead>
             <tbody>
-              ${rows
+              ${orderedRows
                 .map(
                   (row) => `<tr>
                     <td>${esc(row.domain)}</td>
                     <td>${esc((row.divisions || []).join(', '))}</td>
                     <td>${row.objectiveCount}</td>
                     <td>${row.krCount}</td>
+                    <td>${row.subKrCount ?? 0}</td>
+                    <td>${row.initiativeCount ?? 0}</td>
                     <td>
                       <div>${fmtNumber(row.avgAchievement)}%</div>
                       <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, row.avgAchievement))}%"></div></div>
@@ -1670,79 +2391,136 @@ async function renderDomain() {
 }
 
 async function renderKRDetail() {
-  const [list, objectives, allSubKrs, allInitiatives] = await Promise.all([
+  const [list, objectives, allKrs, allSubKrs, allInitiatives, allMonthlyPerformances] = await Promise.all([
     fetchJSON(`/api/dashboard/krs${globalQuery()}`),
     fetchJSON('/api/objectives'),
-    fetchJSON('/api/sub-krs'),
-    fetchJSON('/api/initiatives')
+    fetchJSON(`/api/krs${globalQuery()}`),
+    fetchJSON(`/api/sub-krs${globalQuery()}`),
+    fetchJSON('/api/initiatives'),
+    fetchJSON('/api/monthly-performances?targetType=sub_kr')
   ]);
 
-  if (list.length === 0) {
+  if (list.length === 0 && allSubKrs.length === 0) {
     el.pageContent.innerHTML = `
       <section class="card panel">
         <div class="list-panel-head">
           <div>
-            <h3>KR</h3>
-            <p class="panel-desc">조건에 맞는 KR이 없습니다.</p>
+            <h3>KR/Sub-KR</h3>
+            <p class="panel-desc">조건에 맞는 KR/Sub-KR이 없습니다.</p>
           </div>
         </div>
-        <div class="empty">KR을 생성한 뒤 상세 현황을 확인해 주세요.</div>
+        <div class="empty">KR 또는 Sub-KR을 생성한 뒤 상세 현황을 확인해 주세요.</div>
       </section>
     `;
     return;
   }
 
-  const hasSelected = list.some((item) => item.id === state.selectedKrId);
-  if (!hasSelected) {
+  const objectiveMap = new Map(objectives.map((item) => [item.id, item]));
+  const krMap = new Map(allKrs.map((item) => [item.id, item]));
+  const subKrMap = new Map(allSubKrs.map((item) => [item.id, item]));
+
+  const hasSelectedSubKr = allSubKrs.some((item) => item.id === state.selectedSubKrId);
+  if (!hasSelectedSubKr) state.selectedSubKrId = null;
+
+  const hasSelectedKr = list.some((item) => item.id === state.selectedKrId);
+  if (!hasSelectedKr && !state.selectedSubKrId && list.length > 0) {
     state.selectedKrId = list[0].id;
   }
 
-  const detail = await fetchJSON(`/api/dashboard/kr/${state.selectedKrId}`);
-  const objectiveMap = new Map(objectives.map((item) => [item.id, item]));
-  const parentObjective = objectiveMap.get(detail.kr.objectiveId) || null;
-  const relatedSubKrs = (allSubKrs || []).filter((item) => item.krId === state.selectedKrId);
+  const selectedMode = state.selectedSubKrId ? 'sub_kr' : 'kr';
+  const detail = selectedMode === 'kr' && state.selectedKrId
+    ? await fetchJSON(`/api/dashboard/kr/${state.selectedKrId}`)
+    : null;
+  const selectedSubKr = selectedMode === 'sub_kr' ? subKrMap.get(state.selectedSubKrId) || null : null;
+  const selectedKrForSub = selectedSubKr ? krMap.get(selectedSubKr.krId) || null : null;
+  const parentObjectiveForSub = selectedKrForSub ? objectiveMap.get(selectedKrForSub.objectiveId) || null : null;
+  const subKrMonthlyRows = selectedSubKr
+    ? allMonthlyPerformances
+      .filter((item) => item.targetType === 'sub_kr' && item.targetId === selectedSubKr.id)
+      .sort((a, b) => String(a.yearMonth).localeCompare(String(b.yearMonth)))
+    : [];
+  const subKrActualSum = subKrMonthlyRows.reduce((sum, row) => sum + Number(row.actualValue || 0), 0);
+  const subKrAchievement = selectedSubKr && Number(selectedSubKr.targetValue) > 0
+    ? Number(((subKrActualSum / Number(selectedSubKr.targetValue)) * 100).toFixed(2))
+    : 0;
+  const subKrSignal = subKrAchievement >= 80 ? 'green' : subKrAchievement >= 50 ? 'yellow' : 'red';
+  const subKrInitiatives = selectedSubKr
+    ? allInitiatives.filter((item) => item.subKrId === selectedSubKr.id)
+    : [];
+
+  const parentObjective = detail ? objectiveMap.get(detail.kr.objectiveId) || null : null;
+  const relatedSubKrs = detail ? (allSubKrs || []).filter((item) => item.krId === state.selectedKrId) : [];
   const relatedSubKrIds = new Set(relatedSubKrs.map((item) => item.id));
-  const relatedInitiatives = (allInitiatives || []).filter((item) => {
+  const relatedInitiatives = detail ? (allInitiatives || []).filter((item) => {
     if (item.krId === state.selectedKrId) return true;
     return item.subKrId && relatedSubKrIds.has(item.subKrId);
-  });
-  const krHalfYear = parentObjective
-    ? `${parentObjective.year} ${parentObjective.half}`
-    : '-';
-  const krConnectedInfo = connectedInfoSection([
-    { label: '도메인', value: detail.kr.domain || parentObjective?.domain || '-', variant: 'domain' },
-    { label: 'AARRR', value: detail.kr.aarrrTag || parentObjective?.aarrrTag || '-', variant: 'aarrr' },
-    { label: '실', value: detail.kr.division || parentObjective?.division || parentObjective?.teamId || '-' },
-    { label: '팀', value: detail.kr.team || '-' },
-    { label: '연도/반기', value: krHalfYear },
-    { label: 'Owner', value: detail.kr.owner || parentObjective?.owner || '-' },
-    { label: '상태', value: detail.kr.status || '-', variant: 'status' }
-  ]);
-  const krMonthlyRows = [...(detail.monthly || [])].sort((a, b) => String(a.yearMonth).localeCompare(String(b.yearMonth)));
-  const krUnitLabel = detail.kr.unit ? ` ${detail.kr.unit}` : '';
+  }) : [];
+
+  const krHalfYear = parentObjective ? `${parentObjective.year} ${parentObjective.half}` : '-';
+  const krConnectedInfo = detail
+    ? connectedInfoSection([
+      { label: '상위 O', value: parentObjective?.title || '-' },
+      { label: '도메인', value: detail.kr.domain || parentObjective?.domain || '-', variant: 'domain' },
+      { label: 'AARRR', value: detail.kr.aarrrTag || parentObjective?.aarrrTag || '-', variant: 'aarrr' },
+      { label: '실', value: detail.kr.division || parentObjective?.division || parentObjective?.teamId || '-' },
+      { label: '팀', value: detail.kr.team || '-' },
+      { label: '연도/반기', value: krHalfYear },
+      { label: 'Owner', value: detail.kr.owner || parentObjective?.owner || '-' },
+      { label: '상태', value: detail.kr.status || '-', variant: 'status' }
+    ])
+    : '';
+  const krMonthlyRows = detail ? [...(detail.monthly || [])].sort((a, b) => String(a.yearMonth).localeCompare(String(b.yearMonth))) : [];
+  const krUnitLabel = detail?.kr?.unit ? ` ${detail.kr.unit}` : '';
+  const subKrHalfYear = parentObjectiveForSub ? `${parentObjectiveForSub.year} ${parentObjectiveForSub.half}` : '-';
+  const subKrConnectedInfo = selectedSubKr
+    ? connectedInfoSection([
+      { label: '상위 KR', value: selectedKrForSub?.title || '-' },
+      { label: '상위 O', value: parentObjectiveForSub?.title || '-' },
+      { label: '도메인', value: selectedSubKr.domain || selectedKrForSub?.domain || parentObjectiveForSub?.domain || '-', variant: 'domain' },
+      { label: 'AARRR', value: selectedSubKr.aarrrTag || selectedKrForSub?.aarrrTag || parentObjectiveForSub?.aarrrTag || '-', variant: 'aarrr' },
+      { label: '실', value: selectedSubKr.division || selectedKrForSub?.division || parentObjectiveForSub?.division || parentObjectiveForSub?.teamId || '-' },
+      { label: '팀', value: selectedSubKr.team || selectedKrForSub?.team || '-' },
+      { label: '연도/반기', value: subKrHalfYear },
+      { label: 'Owner', value: selectedSubKr.owner || selectedKrForSub?.owner || parentObjectiveForSub?.owner || '-' },
+      { label: '상태', value: selectedSubKr.status || '-', variant: 'status' }
+    ])
+    : '';
+  const subKrUnitLabel = selectedKrForSub?.unit ? ` ${selectedKrForSub.unit}` : '';
 
   el.pageContent.innerHTML = `
     ${dashboardQuickActions()}
     <section class="split">
       <article class="card panel">
-        <h3>KR 목록</h3>
+        <h3>KR/Sub-KR 목록</h3>
         <div class="list-card">
+          <p class="panel-desc" style="margin:0 0 6px;">KR</p>
           ${list
             .map(
-              (item) => `<button class="option-btn ${item.id === state.selectedKrId ? 'active' : ''}" data-kr-select="${esc(item.id)}">
+              (item) => `<button class="option-btn ${selectedMode === 'kr' && item.id === state.selectedKrId ? 'active' : ''}" data-kr-select="${esc(item.id)}">
                 <strong>${esc(item.title)}</strong>
                 <small>${fmtNumber(item.achievement)}% / ${signalText(item.signal)} / ${esc(item.division || '-')} / ${esc(item.domain || '-')}</small>
               </button>`
             )
             .join('')}
+          <p class="panel-desc" style="margin:8px 0 6px;">Sub-KR</p>
+          ${allSubKrs
+            .map((item) => {
+              const parentKr = krMap.get(item.krId);
+              return `<button class="option-btn ${selectedMode === 'sub_kr' && item.id === state.selectedSubKrId ? 'active' : ''}" data-subkr-select="${esc(item.id)}">
+                <strong>${esc(item.title)}</strong>
+                <small>${esc(parentKr?.title || '-')} / ${esc(item.division || '-')} / ${esc(item.domain || '-')}</small>
+              </button>`;
+            })
+            .join('')}
         </div>
       </article>
 
       <article class="card panel">
+        ${selectedMode === 'kr' && detail ? `
         <div class="list-panel-head">
           <div>
             <h3>${esc(detail.kr.title)}</h3>
-            <p class="panel-desc">KR 달성도, 월 실적, 기여 실험을 관리합니다.</p>
+            <p class="panel-desc">KR 상세 페이지입니다. 달성도, 월 실적, 기여 실험을 관리합니다.</p>
           </div>
           <button class="btn ghost table-inline-btn" type="button" id="btnDeleteKr">삭제</button>
         </div>
@@ -1773,16 +2551,16 @@ async function renderKRDetail() {
           <section>
             <h3>기여도</h3>
             ${detail.contributions.length === 0 ? '<div class="empty">연결된 실험이 없습니다.</div>' : detail.contributions
-              .map(
-                (item) => `<div style="margin-bottom:8px;">
+      .map(
+        (item) => `<div style="margin-bottom:8px;">
                   <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;">
                     <span>${esc(item.experimentTitle)}</span>
                     <strong>${fmtNumber(item.contributionScore)}</strong>
                   </div>
                   <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, item.contributionScore))}%"></div></div>
                 </div>`
-              )
-              .join('')}
+      )
+      .join('')}
           </section>
 
           <section>
@@ -1835,12 +2613,13 @@ async function renderKRDetail() {
         </section>
 
         <section style="margin-top:12px;">
+          <h3>연결 목표/과제</h3>
           <div class="stack-1">
             <article>
               ${relatedSubKrs.length === 0 ? '<div class="empty">연결된 Sub-KR이 없습니다.</div>' : `
                 <div class="table-wrap">
                   <table class="data-table">
-                    <thead><tr><th>Sub-KR</th><th>팀</th><th>Target</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Sub-KR</th><th>팀</th><th>Target</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                       ${relatedSubKrs
       .map(
@@ -1849,6 +2628,7 @@ async function renderKRDetail() {
                             <td>${esc(item.team || '-')}</td>
                             <td>${fmtNumber(item.targetValue)}</td>
                             <td>${statusBadge(item.status || '-')}</td>
+                            <td><button class="btn ghost table-inline-btn" type="button" data-go-subkr="${esc(item.id)}">Sub-KR</button></td>
                           </tr>`
       )
       .join('')}
@@ -1882,6 +2662,86 @@ async function renderKRDetail() {
             </article>
           </div>
         </section>
+        ` : ''}
+
+        ${selectedMode === 'sub_kr' && selectedSubKr ? `
+        <div class="list-panel-head">
+          <div>
+            <h3>${esc(selectedSubKr.title)}</h3>
+            <p class="panel-desc">Sub-KR 상세 페이지입니다. 상위 KR/O와 월 실적을 함께 관리합니다.</p>
+          </div>
+          <button class="btn ghost table-inline-btn" type="button" id="btnDeleteSubKr">삭제</button>
+        </div>
+
+        ${subKrConnectedInfo}
+
+        <div class="grid-4">
+          <div class="stat"><p class="k">Target</p><p class="v">${fmtNumber(selectedSubKr.targetValue)}${esc(subKrUnitLabel)}</p></div>
+          <div class="stat"><p class="k">Actual Sum</p><p class="v">${fmtNumber(subKrActualSum)}${esc(subKrUnitLabel)}</p></div>
+          <div class="stat"><p class="k">Achievement</p><p class="v">${fmtNumber(subKrAchievement)}%</p></div>
+          <div class="stat"><p class="k">Signal</p><p class="v">${signalText(subKrSignal)}</p></div>
+        </div>
+
+        <section style="margin-top:12px;">
+          <div class="section-head-inline">
+            <h3>상태 수정</h3>
+            <button class="btn secondary" id="btnSubKrMonthlyUpdate" type="button" style="width:auto;">+ 월 실적 업데이트</button>
+          </div>
+          <form id="subKrStatusForm" class="inline-actions">
+            <select id="subKrStatusSelect" style="width:180px;">
+              ${statusOptionsHtml(OKR_STATUS_OPTIONS, selectedSubKr.status || 'planned')}
+            </select>
+            <button class="btn secondary" type="submit" style="width:auto;">상태 저장</button>
+          </form>
+        </section>
+
+        <section style="margin-top:12px;">
+          <h3>월 실적</h3>
+          ${subKrMonthlyRows.length === 0
+    ? '<div class="empty">월 실적 데이터 없음</div>'
+    : `<div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>월</th><th>실적</th><th>Source</th><th></th></tr></thead>
+                  <tbody>
+                    ${subKrMonthlyRows
+        .map(
+          (item) => `<tr>
+                      <td>${esc(item.yearMonth)}</td>
+                      <td>${fmtNumber(item.actualValue)}${esc(subKrUnitLabel)}</td>
+                      <td>${statusBadge(item.sourceType || '-')}</td>
+                      <td><button class="btn ghost table-inline-btn" type="button" data-edit-subkr-monthly="${esc(selectedSubKr.id)}" data-ym="${esc(item.yearMonth)}" data-value="${esc(item.actualValue || 0)}">수정</button></td>
+                    </tr>`
+        )
+        .join('')}
+                  </tbody>
+                </table>
+              </div>`}
+        </section>
+
+        <section style="margin-top:12px;">
+          <h3>연결된 Initiative</h3>
+          ${subKrInitiatives.length === 0 ? '<div class="empty">연결된 Initiative가 없습니다.</div>' : `
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Initiative</th><th>팀</th><th>진행률</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                  ${subKrInitiatives
+      .map(
+        (item) => `<tr>
+                      <td>${esc(item.title)}</td>
+                      <td>${esc(item.team || '-')}</td>
+                      <td>${fmtNumber(item.progressQuant)}%</td>
+                      <td>${statusBadge(item.status || '-')}</td>
+                      <td><button class="btn ghost" data-go-initiative="${esc(item.id)}">Initiative</button></td>
+                    </tr>`
+      )
+      .join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </section>
+        ` : ''}
       </article>
     </section>
   `;
@@ -1889,88 +2749,190 @@ async function renderKRDetail() {
   el.pageContent.querySelectorAll('[data-kr-select]').forEach((button) => {
     button.addEventListener('click', async () => {
       state.selectedKrId = button.dataset.krSelect;
+      state.selectedSubKrId = null;
       await renderCurrentRoute();
     });
   });
 
-  const krStatusForm = document.getElementById('krStatusForm');
-  krStatusForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await fetchJSON(`/api/krs/${encodeURIComponent(state.selectedKrId)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          status: document.getElementById('krStatusSelect').value,
-          actor: 'pm.demo',
-          reason: 'update status from KR detail'
-        })
-      });
-      showToast('상태가 저장되었습니다.');
+  el.pageContent.querySelectorAll('[data-subkr-select]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      state.selectedSubKrId = button.dataset.subkrSelect;
       await renderCurrentRoute();
-    } catch (err) {
-      showToast(err.message, true);
+    });
+  });
+
+  if (selectedMode === 'kr' && detail) {
+    const krStatusForm = document.getElementById('krStatusForm');
+    if (krStatusForm) {
+      krStatusForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          await fetchJSON(`/api/krs/${encodeURIComponent(state.selectedKrId)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              status: document.getElementById('krStatusSelect').value,
+              actor: 'pm.demo',
+              reason: 'update status from KR detail'
+            })
+          });
+          showToast('상태가 저장되었습니다.');
+          await renderCurrentRoute();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
     }
-  });
 
-  const btnKrMonthlyUpdate = document.getElementById('btnKrMonthlyUpdate');
-  btnKrMonthlyUpdate.addEventListener('click', () => {
-    openMonthlyUpdateModal({
-      title: 'KR 월 실적 업데이트',
-      description: '월 단위 KR 실적을 입력합니다.',
-      targetType: 'kr',
-      targetId: state.selectedKrId,
-      valueLabel: detail.kr.unit ? `실적값 (${detail.kr.unit})` : '실적값',
-      step: '0.01',
-      successMessage: '월 실적이 저장되었습니다.'
-    });
-  });
+    const btnKrMonthlyUpdate = document.getElementById('btnKrMonthlyUpdate');
+    if (btnKrMonthlyUpdate) {
+      btnKrMonthlyUpdate.addEventListener('click', () => {
+        openMonthlyUpdateModal({
+          title: 'KR 월 실적 업데이트',
+          description: '월 단위 KR 실적을 입력합니다.',
+          targetType: 'kr',
+          targetId: state.selectedKrId,
+          valueLabel: detail.kr.unit ? `실적값 (${detail.kr.unit})` : '실적값',
+          step: '0.01',
+          successMessage: '월 실적이 저장되었습니다.'
+        });
+      });
+    }
 
-  el.pageContent.querySelectorAll('[data-edit-kr-monthly]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const targetId = button.dataset.editKrMonthly || '';
-      const yearMonth = String(button.dataset.ym || '').trim();
-      const rawValue = Number(button.dataset.value);
-      if (!targetId || !yearMonth) return;
-      openMonthlyUpdateModal({
-        title: 'KR 월 실적 수정',
-        description: 'KR 실적값을 월 단위로 수정합니다.',
-        targetType: 'kr',
-        targetId,
-        defaultYearMonth: yearMonth,
-        defaultValue: Number.isFinite(rawValue) ? rawValue : undefined,
-        valueLabel: detail.kr.unit ? `실적값 (${detail.kr.unit})` : '실적값',
-        step: '0.01',
-        isEdit: true,
-        successMessage: '월 실적이 수정되었습니다.'
+    el.pageContent.querySelectorAll('[data-edit-kr-monthly]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetId = button.dataset.editKrMonthly || '';
+        const yearMonth = String(button.dataset.ym || '').trim();
+        const rawValue = Number(button.dataset.value);
+        if (!targetId || !yearMonth) return;
+        openMonthlyUpdateModal({
+          title: 'KR 월 실적 수정',
+          description: 'KR 실적값을 월 단위로 수정합니다.',
+          targetType: 'kr',
+          targetId,
+          defaultYearMonth: yearMonth,
+          defaultValue: Number.isFinite(rawValue) ? rawValue : undefined,
+          valueLabel: detail.kr.unit ? `실적값 (${detail.kr.unit})` : '실적값',
+          step: '0.01',
+          isEdit: true,
+          successMessage: '월 실적이 수정되었습니다.'
+        });
       });
     });
-  });
+
+    el.pageContent.querySelectorAll('[data-go-subkr]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.selectedSubKrId = button.dataset.goSubkr;
+        renderCurrentRoute();
+      });
+    });
+
+    const btnDeleteKr = document.getElementById('btnDeleteKr');
+    if (btnDeleteKr) {
+      btnDeleteKr.addEventListener('click', async () => {
+        try {
+          const deleted = await confirmDeleteAndRefresh({
+            path: `/api/krs/${encodeURIComponent(detail.kr.id)}`,
+            label: detail.kr.title,
+            reason: 'delete kr from KR detail page'
+          });
+          if (deleted) {
+            state.selectedKrId = null;
+            state.selectedSubKrId = null;
+          }
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+    }
+  }
+
+  if (selectedMode === 'sub_kr' && selectedSubKr) {
+    const subKrStatusForm = document.getElementById('subKrStatusForm');
+    if (subKrStatusForm) {
+      subKrStatusForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          await fetchJSON(`/api/sub-krs/${encodeURIComponent(selectedSubKr.id)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              status: document.getElementById('subKrStatusSelect').value,
+              actor: 'pm.demo',
+              reason: 'update status from Sub-KR detail'
+            })
+          });
+          showToast('상태가 저장되었습니다.');
+          await renderCurrentRoute();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+    }
+
+    const btnSubKrMonthlyUpdate = document.getElementById('btnSubKrMonthlyUpdate');
+    if (btnSubKrMonthlyUpdate) {
+      btnSubKrMonthlyUpdate.addEventListener('click', () => {
+        openMonthlyUpdateModal({
+          title: 'Sub-KR 월 실적 업데이트',
+          description: '월 단위 Sub-KR 실적을 입력합니다.',
+          targetType: 'sub_kr',
+          targetId: selectedSubKr.id,
+          valueLabel: selectedKrForSub?.unit ? `실적값 (${selectedKrForSub.unit})` : '실적값',
+          step: '0.01',
+          successMessage: '월 실적이 저장되었습니다.'
+        });
+      });
+    }
+
+    el.pageContent.querySelectorAll('[data-edit-subkr-monthly]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetId = button.dataset.editSubkrMonthly || '';
+        const yearMonth = String(button.dataset.ym || '').trim();
+        const rawValue = Number(button.dataset.value);
+        if (!targetId || !yearMonth) return;
+        openMonthlyUpdateModal({
+          title: 'Sub-KR 월 실적 수정',
+          description: 'Sub-KR 실적값을 월 단위로 수정합니다.',
+          targetType: 'sub_kr',
+          targetId,
+          defaultYearMonth: yearMonth,
+          defaultValue: Number.isFinite(rawValue) ? rawValue : undefined,
+          valueLabel: selectedKrForSub?.unit ? `실적값 (${selectedKrForSub.unit})` : '실적값',
+          step: '0.01',
+          isEdit: true,
+          successMessage: '월 실적이 수정되었습니다.'
+        });
+      });
+    });
+
+    const btnDeleteSubKr = document.getElementById('btnDeleteSubKr');
+    if (btnDeleteSubKr) {
+      btnDeleteSubKr.addEventListener('click', async () => {
+        try {
+          const deleted = await confirmDeleteAndRefresh({
+            path: `/api/sub-krs/${encodeURIComponent(selectedSubKr.id)}`,
+            label: selectedSubKr.title,
+            reason: 'delete sub-kr from Sub-KR detail page'
+          });
+          if (deleted) {
+            state.selectedSubKrId = null;
+          }
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+    }
+  }
 
   el.pageContent.querySelectorAll('[data-go-initiative]').forEach((button) => {
     button.addEventListener('click', () => {
       state.selectedInitiativeId = button.dataset.goInitiative;
+      state.selectedSubKrId = null;
       navigate('/goals/initiatives');
     });
   });
 
-  const btnDeleteKr = document.getElementById('btnDeleteKr');
-  if (btnDeleteKr) {
-    btnDeleteKr.addEventListener('click', async () => {
-      try {
-        const deleted = await confirmDeleteAndRefresh({
-          path: `/api/krs/${encodeURIComponent(detail.kr.id)}`,
-          label: detail.kr.title,
-          reason: 'delete kr from KR detail page'
-        });
-        if (deleted) {
-          state.selectedKrId = null;
-        }
-      } catch (err) {
-        showToast(err.message, true);
-      }
-    });
-  }
   bindRouteJumpButtons();
 }
 
@@ -1981,22 +2943,23 @@ async function renderReview() {
     ${dashboardQuickActions()}
     <section class="review-stack">
       <article class="card panel">
-        <h3>Review Priority KR</h3>
-        ${data.reviewItems.length === 0 ? '<div class="empty">리뷰 대상 KR이 없습니다.</div>' : `
+        <h3>Review Priority (KR / Sub-KR / Initiative)</h3>
+        ${data.reviewItems.length === 0 ? '<div class="empty">리뷰 대상 항목이 없습니다.</div>' : `
           <div class="table-wrap">
             <table class="data-table">
-              <thead><tr><th>KR</th><th>Objective</th><th>실</th><th>도메인</th><th>Signal</th><th>Top Contributor</th><th></th></tr></thead>
+              <thead><tr><th>Type</th><th>항목</th><th>Objective</th><th>실</th><th>도메인</th><th>Signal</th><th>Top Contributor</th><th></th></tr></thead>
               <tbody>
                 ${data.reviewItems
                   .map(
                     (item) => `<tr>
-                      <td>${esc(item.krTitle)}</td>
+                      <td>${esc(item.typeLabel || (item.entityType === 'sub_kr' ? 'Sub-KR' : item.entityType === 'initiative' ? 'Initiative' : 'KR'))}</td>
+                      <td>${esc(item.title || item.krTitle || '-')}</td>
                       <td>${esc(item.objectiveTitle)}</td>
                       <td>${esc(item.division || '-')}</td>
                       <td>${esc(item.domain || '-')}</td>
                       <td>${signalBadge(item.signal)} (${fmtNumber(item.achievement)}%)</td>
                       <td>${esc(item.topContributor ? item.topContributor.experimentTitle : '-')}</td>
-                      <td><button class="btn ghost" data-go-kr="${esc(item.krId)}">KR</button></td>
+                      <td><button class="btn ghost" data-go-entity="${esc(item.entityType || 'kr')}|${esc(item.krId || item.subKrId || item.initiativeId || '')}">이동</button></td>
                     </tr>`
                   )
                   .join('')}
@@ -2019,10 +2982,28 @@ async function renderReview() {
     </section>
   `;
 
-  el.pageContent.querySelectorAll('[data-go-kr]').forEach((button) => {
+  el.pageContent.querySelectorAll('[data-go-entity]').forEach((button) => {
     button.addEventListener('click', () => {
-      state.selectedKrId = button.dataset.goKr;
-      navigate('/goals/krs');
+      const [type, id] = String(button.dataset.goEntity || '').split('|');
+      if (type === 'kr') {
+        state.selectedKrId = id;
+        state.selectedSubKrId = null;
+        navigate('/goals/krs');
+        return;
+      }
+      if (type === 'sub_kr') {
+        const reviewItems = data.reviewItems || [];
+        const related = reviewItems.find((row) => row.subKrId === id);
+        state.selectedKrId = related?.krId || state.selectedKrId || null;
+        state.selectedSubKrId = id;
+        navigate('/goals/krs');
+        return;
+      }
+      if (type === 'initiative') {
+        state.selectedInitiativeId = id;
+        state.selectedSubKrId = null;
+        navigate('/goals/initiatives');
+      }
     });
   });
   bindRouteJumpButtons();
@@ -2133,7 +3114,11 @@ function hierarchyTitleCell(row) {
         : row.entityType === 'sub_kr'
           ? 'Sub-KR'
           : 'Initiative';
-  return `<div class="hier-title depth-${depth}"><span class="hier-prefix">${esc(typeLabel)}</span><span>${esc(row.title || '-')}</span></div>`;
+  const canNavigate = ['objective', 'kr', 'initiative'].includes(String(row.entityType || '').trim());
+  if (!canNavigate) {
+    return `<div class="hier-title depth-${depth}"><span class="hier-prefix">${esc(typeLabel)}</span><span>${esc(row.title || '-')}</span></div>`;
+  }
+  return `<button class="hier-title depth-${depth} table-link-btn table-hier-link" type="button" data-go-okr-entity="${esc(row.entityType || '')}" data-go-okr-id="${esc(row.entityId || '')}"><span class="hier-prefix">${esc(typeLabel)}</span><span>${esc(row.title || '-')}</span></button>`;
 }
 
 async function renderOKRTable() {
@@ -2143,12 +3128,14 @@ async function renderOKRTable() {
     sortBy: 'hierarchy',
     sortOrder: 'asc'
   });
+  const exportQuery = globalQuery({ sortBy: 'hierarchy', sortOrder: 'asc' });
   const data = await fetchJSON(`/api/dashboard/okr-table${query}`);
 
   const rows = data.rows || [];
   const getNormalizedExperiments = (row) => {
     const list = Array.isArray(row?.linkedExperiments) ? row.linkedExperiments : [];
     const normalized = list.map((item) => ({
+      id: String(item?.id || '').trim(),
       title: textOrDash(item?.title),
       startDate: textOrDash(item?.startDate),
       endDate: textOrDash(item?.endDate),
@@ -2163,6 +3150,7 @@ async function renderOKRTable() {
 
     if (normalized.length === 0 && hasLegacy) {
       normalized.push({
+        id: '',
         title: textOrDash(row?.linkedExperimentTitle),
         startDate: textOrDash(row?.linkedExperimentStartDate),
         endDate: textOrDash(row?.linkedExperimentEndDate),
@@ -2174,6 +3162,7 @@ async function renderOKRTable() {
     const expectedCount = Number.isFinite(countHint) && countHint > 0 ? countHint : normalized.length;
     while (normalized.length < expectedCount) {
       normalized.push({
+        id: '',
         title: '-',
         startDate: '-',
         endDate: '-',
@@ -2188,12 +3177,21 @@ async function renderOKRTable() {
     ...row,
     linkedExperiments: getNormalizedExperiments(row)
   }));
+  const experimentTitleCell = (exp) => {
+    const title = textOrDash(exp?.title);
+    if (title === '-') return '-';
+    return `<button class="table-link-btn" type="button" data-okr-exp-link="${esc(exp?.id || '')}" data-okr-exp-title="${esc(title)}">${esc(title)}</button>`;
+  };
 
-  const maxLinkedExperimentCount = normalizedRows.reduce(
-    (max, row) => Math.max(max, Number(row.linkedExperiments.length || 0)),
-    0
-  );
   const summary = data.summary || { total: 0, byClassification: {}, bySignal: {} };
+  const isKrLike = (row) => ['kr', 'sub_kr'].includes(String(row.entityType || '').trim());
+  const divObjectiveCount = normalizedRows.filter((row) => String(row.effectiveClassification || '').trim() === '실 O').length;
+  const divKrCount = normalizedRows.filter((row) => isKrLike(row) && String(row.effectiveClassification || '').trim() === '실 KR').length;
+  const teamObjectiveCount = normalizedRows.filter((row) => String(row.effectiveClassification || '').trim() === '팀 O').length;
+  const teamKrCount = normalizedRows.filter((row) => isKrLike(row) && String(row.effectiveClassification || '').trim() === '팀 KR').length;
+  const teamInitiativeCount = normalizedRows.filter(
+    (row) => String(row.effectiveClassification || '').trim() === '팀 Initiative'
+  ).length;
   const pagination = data.pagination || { page: 1, pageSize: state.tablePageSize, totalPages: 1, total: rows.length };
   state.tablePage = Number(pagination.page || 1);
   state.tablePageSize = Number(pagination.pageSize || state.tablePageSize || 20);
@@ -2203,26 +3201,15 @@ async function renderOKRTable() {
     dataAttr: 'table'
   });
 
-  const experimentColumns = Array.from({ length: maxLinkedExperimentCount }, (_, index) => {
-    const slot = index + 1;
-    return `
-      <th class="col-exp-title">실험 제목 ${slot}</th>
-      <th class="col-exp-date">실험 시작일 ${slot}</th>
-      <th class="col-exp-date">실험 종료일 ${slot}</th>
-      <th class="col-exp-result">실험 결과 ${slot}</th>
-    `;
-  }).join('');
-
   el.pageContent.innerHTML = `
     ${dashboardQuickActions()}
 
-    <section class="card panel grid-3">
-      <article class="stat"><p class="k">Rows</p><p class="v">${summary.total || 0}</p></article>
-      <article class="stat"><p class="k">실 O</p><p class="v">${summary.byClassification?.['실 O'] || 0}</p></article>
-      <article class="stat"><p class="k">실 KR</p><p class="v">${summary.byClassification?.['실 KR'] || 0}</p></article>
-      <article class="stat"><p class="k">팀 O</p><p class="v">${summary.byClassification?.['팀 O'] || 0}</p></article>
-      <article class="stat"><p class="k">팀 KR</p><p class="v">${summary.byClassification?.['팀 KR'] || 0}</p></article>
-      <article class="stat"><p class="k">팀 Initiative</p><p class="v">${summary.byClassification?.['팀 Initiative'] || 0}</p></article>
+    <section class="card panel" style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:8px;">
+      <article class="stat"><p class="k">실 O</p><p class="v">${divObjectiveCount}</p></article>
+      <article class="stat"><p class="k">실 KR</p><p class="v">${divKrCount}</p></article>
+      <article class="stat"><p class="k">팀 O</p><p class="v">${teamObjectiveCount}</p></article>
+      <article class="stat"><p class="k">팀 KR</p><p class="v">${teamKrCount}</p></article>
+      <article class="stat"><p class="k">팀 Initiative</p><p class="v">${teamInitiativeCount}</p></article>
     </section>
 
     <section class="card panel table-panel">
@@ -2236,18 +3223,17 @@ async function renderOKRTable() {
             <option value="100" ${state.tablePageSize === 100 ? 'selected' : ''}>100</option>
           </select>
         </div>
+        <button class="btn secondary table-inline-btn" id="btnExportOKRTable">CSV 내보내기</button>
       </div>
       ${normalizedRows.length === 0 ? '<div class="empty">조건에 맞는 데이터가 없습니다.</div>' : `
         <div class="table-wrap okr-table-wrap">
           <table class="data-table okr-table">
             <thead>
               <tr>
-                <th class="col-classification">분류</th>
                 <th class="col-domain">도메인</th>
                 <th class="col-aarrr">AARRR</th>
                 <th class="col-division">실</th>
                 <th class="col-team">팀</th>
-                <th class="col-objective">Objective</th>
                 <th class="col-title">항목명</th>
                 <th class="col-number">Baseline</th>
                 <th class="col-number">Q1 목표</th>
@@ -2261,31 +3247,26 @@ async function renderOKRTable() {
                 <th class="col-number">Q1 달성률</th>
                 <th class="col-number">Q2 달성률</th>
                 <th class="col-status">신호</th>
-                ${experimentColumns}
+                <th class="col-exp-title">실험 제목</th>
+                <th class="col-exp-date">실험 시작일</th>
+                <th class="col-exp-date">실험 종료일</th>
+                <th class="col-exp-result">실험 결과</th>
+                <th class="col-rep-owner">대표 담당자</th>
               </tr>
             </thead>
             <tbody>
               ${normalizedRows
                 .map(
                   (row) => {
-                    const expCells = Array.from({ length: maxLinkedExperimentCount }, (_, index) => {
-                      const exp = row?.linkedExperiments?.[index] || null;
-                      const title = textOrDash(exp?.title);
-                      const startDate = textOrDash(exp?.startDate);
-                      const endDate = textOrDash(exp?.endDate);
-                      const result = textOrDash(exp?.result);
-                      return `<td class="col-exp-title cell-text">${esc(title)}</td>
-                        <td class="col-exp-date">${esc(startDate)}</td>
-                        <td class="col-exp-date">${esc(endDate)}</td>
-                        <td class="col-exp-result cell-text">${esc(result)}</td>`;
-                    }).join('');
-                    return `<tr class="${esc(classificationRowTone(row.effectiveClassification))}">
-                    <td class="col-classification">${classificationBadge(row.effectiveClassification)}</td>
+                    const experiments = Array.isArray(row.linkedExperiments) && row.linkedExperiments.length > 0
+                      ? row.linkedExperiments
+                      : [{ title: '-', startDate: '-', endDate: '-', result: '-' }];
+                    const primary = experiments[0];
+                    const primaryRow = `<tr class="${esc(classificationRowTone(row.effectiveClassification))}">
                     <td class="col-domain">${tableMetaBadge(row.domain || '-', 'domain')}</td>
                     <td class="col-aarrr">${tableMetaBadge(row.aarrrTag || '-', 'aarrr')}</td>
                     <td class="col-division">${esc(row.division || '-')}</td>
                     <td class="col-team">${esc(row.team || '-')}</td>
-                    <td class="col-objective cell-text">${esc(row.objectiveTitle || '-')}</td>
                     <td class="col-title cell-text">${hierarchyTitleCell(row)}</td>
                     <td class="col-number">${valueOrDash(row.baseline)}</td>
                     <td class="col-number">${valueOrDash(row.q1Target)}</td>
@@ -2299,8 +3280,42 @@ async function renderOKRTable() {
                     <td class="col-number">${percentOrDash(row.q1Achievement)}</td>
                     <td class="col-number">${percentOrDash(row.q2Achievement)}</td>
                     <td class="col-status">${signalBadge(row.signal)}</td>
-                    ${expCells}
+                    <td class="col-exp-title cell-text">${experimentTitleCell(primary)}</td>
+                    <td class="col-exp-date">${esc(textOrDash(primary?.startDate))}</td>
+                    <td class="col-exp-date">${esc(textOrDash(primary?.endDate))}</td>
+                    <td class="col-exp-result cell-text">${esc(textOrDash(primary?.result))}</td>
+                    <td class="col-rep-owner">${esc(textOrDash(row.owner))}</td>
                   </tr>`;
+                    const extraRows = experiments
+                      .slice(1)
+                      .map(
+                        (exp) => `<tr class="row-linked-exp">
+                          <td class="col-domain"></td>
+                          <td class="col-aarrr"></td>
+                          <td class="col-division"></td>
+                          <td class="col-team"></td>
+                          <td class="col-title cell-text">↳ 연결 실험</td>
+                          <td class="col-number"></td>
+                          <td class="col-number"></td>
+                          <td class="col-number"></td>
+                          <td class="col-month"></td>
+                          <td class="col-month"></td>
+                          <td class="col-month"></td>
+                          <td class="col-month"></td>
+                          <td class="col-month"></td>
+                          <td class="col-month"></td>
+                          <td class="col-number"></td>
+                          <td class="col-number"></td>
+                          <td class="col-status"></td>
+                          <td class="col-exp-title cell-text">${experimentTitleCell(exp)}</td>
+                          <td class="col-exp-date">${esc(textOrDash(exp?.startDate))}</td>
+                          <td class="col-exp-date">${esc(textOrDash(exp?.endDate))}</td>
+                          <td class="col-exp-result cell-text">${esc(textOrDash(exp?.result))}</td>
+                          <td class="col-rep-owner"></td>
+                        </tr>`
+                      )
+                      .join('');
+                    return `${primaryRow}${extraRows}`;
                   }
                 )
                 .join('')}
@@ -2325,12 +3340,63 @@ async function renderOKRTable() {
     });
   }
 
+  const btnExportOKRTable = document.getElementById('btnExportOKRTable');
+  if (btnExportOKRTable) {
+    btnExportOKRTable.addEventListener('click', () => {
+      window.location.href = `/api/dashboard/okr-table/export.csv${exportQuery}`;
+    });
+  }
+
   el.pageContent.querySelectorAll('[data-table-page]').forEach((button) => {
     button.addEventListener('click', async () => {
       const page = Number(button.dataset.tablePage || 1);
       if (!Number.isFinite(page) || page < 1 || page === state.tablePage) return;
       state.tablePage = page;
       await renderCurrentRoute();
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-go-okr-entity]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const entityType = String(button.dataset.goOkrEntity || '').trim();
+      const entityId = String(button.dataset.goOkrId || '').trim();
+      if (!entityId) return;
+      if (entityType === 'objective') {
+        state.selectedObjectiveId = entityId;
+        navigate('/goals/objectives');
+        return;
+      }
+      if (entityType === 'kr') {
+        state.selectedKrId = entityId;
+        state.selectedSubKrId = null;
+        navigate('/goals/krs');
+        return;
+      }
+      if (entityType === 'initiative') {
+        state.selectedInitiativeId = entityId;
+        navigate('/goals/initiatives');
+      }
+    });
+  });
+
+  el.pageContent.querySelectorAll('[data-okr-exp-link]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const experimentId = String(button.dataset.okrExpLink || '').trim();
+      const experimentTitle = String(button.dataset.okrExpTitle || '').trim();
+      openLayerModal({
+        title: '실험플랫폼 링크 연결',
+        description: '아직 실험플랫폼 URL이 연결되지 않았습니다.',
+        bodyHtml: `
+          <div class="field-row">
+            <p>실험 제목: ${esc(experimentTitle || '-')}</p>
+            <p>실험 ID: ${esc(experimentId || '-')}</p>
+            <small class="field-help">추후 URL 연결 기능이 제공될 예정입니다.</small>
+          </div>
+        `,
+        submitLabel: '닫기',
+        showCancel: false,
+        onSubmit: async () => {}
+      });
     });
   });
 
@@ -2378,6 +3444,7 @@ async function renderObjectives() {
     objectiveKrs.length > 0
       ? Number((objectiveKrs.reduce((sum, row) => sum + Number(row.achievement || 0), 0) / objectiveKrs.length).toFixed(2))
       : 0;
+  const objectiveSignal = signalFromValue(avgAchievement);
   const objectiveConnectedInfo = connectedInfoSection([
     { label: '도메인', value: selectedObjective.domain || '-', variant: 'domain' },
     { label: 'AARRR', value: selectedObjective.aarrrTag || '-', variant: 'aarrr' },
@@ -2416,8 +3483,9 @@ async function renderObjectives() {
 
         ${objectiveConnectedInfo}
 
-        <div class="grid-3">
+        <div class="grid-4">
           <div class="stat"><p class="k">Avg Achievement</p><p class="v">${fmtNumber(avgAchievement)}%</p></div>
+          <div class="stat"><p class="k">Signal</p><p class="v">${signalBadge(objectiveSignal)}</p></div>
           <div class="stat"><p class="k">KRs</p><p class="v">${objectiveKrs.length}</p></div>
           <div class="stat"><p class="k">Initiatives</p><p class="v">${relatedInitiatives.length}</p></div>
         </div>
@@ -2461,6 +3529,7 @@ async function renderObjectives() {
   el.pageContent.querySelectorAll('[data-go-kr]').forEach((button) => {
     button.addEventListener('click', () => {
       state.selectedKrId = button.dataset.goKr;
+      state.selectedSubKrId = null;
       navigate('/goals/krs');
     });
   });
@@ -2884,6 +3953,7 @@ async function renderInitiatives() {
     ? directLinkedExperiments
     : [...new Map(inheritedKrExperiments.map((item) => [item.id, item])).values()];
   const isInheritedFromKr = directLinkedExperiments.length === 0 && resolvedLinkedExperiments.length > 0;
+  const initiativeSignal = signalFromValue(selectedInitiative.progressQuant);
   const initiativeHalfYear = selectedObjective
     ? `${selectedObjective.year} ${selectedObjective.half}`
     : (selectedInitiative.year && selectedInitiative.half ? `${selectedInitiative.year} ${selectedInitiative.half}` : '-');
@@ -2925,8 +3995,9 @@ async function renderInitiatives() {
 
         ${initiativeConnectedInfo}
 
-        <div class="grid-4">
+        <div class="grid-5">
           <div class="stat"><p class="k">Progress</p><p class="v">${fmtNumber(selectedInitiative.progressQuant)}%</p></div>
+          <div class="stat"><p class="k">Signal</p><p class="v">${signalBadge(initiativeSignal)}</p></div>
           <div class="stat"><p class="k">Monthly Entries</p><p class="v">${monthly.length}</p></div>
           <div class="stat"><p class="k">Mapping Source</p><p class="v">${isInheritedFromKr ? 'KR inherited' : 'Initiative direct'}</p></div>
           <div class="stat"><p class="k">Linked Experiments</p><p class="v">${resolvedLinkedExperiments.length}</p></div>
@@ -3117,7 +4188,7 @@ async function renderInputSources() {
     fetchJSON('/api/initiatives').catch(() => []),
     fetchJSON('/api/krs').catch(() => []),
     fetchJSON('/api/sub-krs').catch(() => []),
-    fetchJSON('/api/admin/taxonomy').catch(() => ({ teams: [], divisions: [] }))
+    fetchJSON('/api/admin/taxonomy')
   ]);
 
   const inputById = new Map(inputs.map((item) => [item.id, item]));
@@ -3178,21 +4249,21 @@ async function renderInputSources() {
             <label for="layerInputClassification">분류 *</label>
             <select id="layerInputClassification" name="classification" required>
               <option value="">선택</option>
-              ${(taxonomy.inputClassifications || ['Problem', 'Opportunity', 'Needs']).map((item) => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
+              ${(Array.isArray(taxonomy.inputClassifications) ? taxonomy.inputClassifications : []).map((item) => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
             </select>
           </div>
           <div class="field-row">
             <label for="layerInputProduct">프로덕트 구분 *</label>
             <select id="layerInputProduct" name="product" required>
               <option value="">선택</option>
-              ${(taxonomy.inputProducts || ['Food', 'QC', 'Order', 'Core', 'Membership', 'Delivery', 'CS']).map((item) => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
+              ${(Array.isArray(taxonomy.inputProducts) ? taxonomy.inputProducts : []).map((item) => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
             </select>
           </div>
           <div class="field-row">
             <label for="layerInputSource">소스 *</label>
             <select id="layerInputSource" name="source" required>
               <option value="">선택</option>
-              ${(taxonomy.inputSources || ['NPS', 'VOC', 'Team']).map((item) => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
+              ${(Array.isArray(taxonomy.inputSources) ? taxonomy.inputSources : []).map((item) => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
             </select>
           </div>
           <div class="field-row">
@@ -3739,24 +4810,7 @@ async function renderSearch() {
 }
 
 async function renderAdminPresets() {
-  let presetData = null;
-  let presetApiAvailable = true;
-  try {
-    presetData = await fetchJSON('/api/admin/presets');
-  } catch (_err) {
-    const taxonomy = await fetchJSON('/api/admin/taxonomy');
-    presetApiAvailable = false;
-    presetData = {
-      domains: taxonomy.domains || [],
-      divisions: taxonomy.divisions || [],
-      teams: taxonomy.teams || [],
-      teamDivisions: taxonomy.teamDivisions || {},
-      inputClassifications: taxonomy.inputClassifications || [],
-      inputProducts: taxonomy.inputProducts || [],
-      inputSources: taxonomy.inputSources || [],
-      meta: {}
-    };
-  }
+  const presetData = await fetchJSON('/api/admin/presets');
   const okrPresetGroups = [
     { key: 'domains', label: 'OKR 도메인', hint: 'Objective/KR/Initiative 도메인 선택값' },
     { key: 'divisions', label: 'OKR 실', hint: 'Objective/KR/Initiative 실 선택값' },
@@ -3781,8 +4835,8 @@ async function renderAdminPresets() {
 
   function renderValuePresetBlock(group) {
     const values = Array.isArray(presetData[group.key]) ? presetData[group.key] : [];
-    const disabledAttr = presetApiAvailable ? '' : 'disabled';
-    const readOnlyAttr = presetApiAvailable ? '' : 'readonly';
+    const disabledAttr = '';
+    const readOnlyAttr = '';
     return `
       <section class="preset-block">
         <div class="section-head-inline">
@@ -3825,8 +4879,8 @@ async function renderAdminPresets() {
 
   function renderTeamPresetBlock(group) {
     const values = Array.isArray(presetData[group.key]) ? presetData[group.key] : [];
-    const disabledAttr = presetApiAvailable ? '' : 'disabled';
-    const readOnlyAttr = presetApiAvailable ? '' : 'readonly';
+    const disabledAttr = '';
+    const readOnlyAttr = '';
     return `
       <section class="preset-block">
         <div class="section-head-inline">
@@ -3888,7 +4942,6 @@ async function renderAdminPresets() {
     <section class="grid-2 preset-grid">
       <article class="card panel">
         <h3>OKR 프리셋</h3>
-        ${presetApiAvailable ? '' : '<p class="panel-desc">프리셋 API를 찾지 못해 현재 읽기 전용으로 표시됩니다.</p>'}
         ${okrPresetGroups.map((group) => renderPresetBlock(group)).join('')}
       </article>
       <article class="card panel">
@@ -3901,10 +4954,6 @@ async function renderAdminPresets() {
   el.pageContent.querySelectorAll('[data-preset-add-form]').forEach((form) => {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!presetApiAvailable) {
-        showToast('프리셋 API가 준비되지 않아 저장할 수 없습니다.', true);
-        return;
-      }
       const presetType = String(form.dataset.presetAddForm || '').trim();
       const input = form.querySelector('input[name="value"]');
       const value = String(input?.value || '').trim();
@@ -3943,10 +4992,6 @@ async function renderAdminPresets() {
 
   el.pageContent.querySelectorAll('[data-preset-update]').forEach((button) => {
     button.addEventListener('click', async () => {
-      if (!presetApiAvailable) {
-        showToast('프리셋 API가 준비되지 않아 수정할 수 없습니다.', true);
-        return;
-      }
       const presetType = String(button.dataset.presetType || '').trim();
       const currentValue = String(button.dataset.currentValue || '').trim();
       const inputId = String(button.dataset.inputId || '').trim();
@@ -3989,10 +5034,6 @@ async function renderAdminPresets() {
 
   el.pageContent.querySelectorAll('[data-preset-delete]').forEach((button) => {
     button.addEventListener('click', async () => {
-      if (!presetApiAvailable) {
-        showToast('프리셋 API가 준비되지 않아 삭제할 수 없습니다.', true);
-        return;
-      }
       const presetType = String(button.dataset.presetType || '').trim();
       const value = String(button.dataset.currentValue || '').trim();
       if (!presetType || !value) return;
@@ -4018,94 +5059,65 @@ async function renderAdminPresets() {
   });
 }
 
-async function renderAdminNotifications() {
-  const render = async () => {
-    const currentMonth = (() => {
-      const now = new Date();
-      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    })();
-    const monthFilter = String(document.getElementById('notificationMonthFilter')?.value || '').trim();
-    const statusFilter = String(document.getElementById('notificationStatusFilter')?.value || 'all').trim();
-    const params = new URLSearchParams();
-    params.set('limit', '300');
-    if (monthFilter) params.set('yearMonth', monthFilter);
-    if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
-    const data = await fetchJSON(`/api/admin/notifications?${params.toString()}`);
+async function renderDashboardNotifications() {
+  const monthFilter = String(state.notificationMonthFilter || '').trim();
+  const statusFilter = String(state.notificationStatusFilter || 'all').trim();
+  const params = new URLSearchParams();
+  params.set('limit', '300');
+  if (monthFilter) params.set('yearMonth', monthFilter);
+  if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
 
-    const notifications = Array.isArray(data.notifications) ? data.notifications : [];
-    const normalizeNotificationStatus = (status) => {
-      const raw = String(status || '').trim();
-      if (!raw) return 'missing';
-      if (raw === '미등록') return 'missing';
-      if (raw === '실적 등록' || raw === '등록') return 'registered';
-      return raw.toLowerCase();
-    };
+  const data = await fetchJSON(`/api/dashboard/notifications${params.toString() ? `?${params.toString()}` : ''}`);
 
-    const normalizedNotifications = notifications.map((item) => ({
-      ...item,
-      __status: normalizeNotificationStatus(item.status),
-      __division: textOrDash(item.division || item.targetDivision || '-'),
-      __owner: textOrDash(item.owner || item.targetOwner || '-')
-    }));
-    const derivedSummary = {
-      total: normalizedNotifications.length,
-      registered: normalizedNotifications.filter((item) => item.__status === 'registered').length,
-      missing: normalizedNotifications.filter((item) => item.__status === 'missing').length
-    };
-    const summary = derivedSummary;
-    const targetTypeLabels = {
-      kr: 'KR',
-      sub_kr: 'Sub-KR',
-      initiative: 'Initiative'
-    };
-    const valueLabelByType = {
-      kr: '실적값',
-      sub_kr: '실적값',
-      initiative: '진행률(%)'
-    };
-    const statusLabelByType = {
-      registered: '실적 등록',
-      missing: '미등록'
-    };
+  const notifications = Array.isArray(data.notifications) ? data.notifications : [];
+  const normalizedNotifications = notifications.map((item) => ({
+    ...item,
+    __status: (String(item.status || '').trim() === 'registered' ? 'registered' : String(item.status || '').trim() === 'missing' ? 'missing' : ''),
+    __division: textOrDash(item.division || item.targetDivision || '-'),
+    __owner: textOrDash(item.owner || item.targetOwner || '-')
+  }));
+  const range = state.notificationRange || { preset: 'all', from: '', to: '' };
+  const rangedNotifications = normalizedNotifications.filter((item) => {
+    if (String(range.preset || 'all') === 'all') return true;
+    return inDateRange(item.yearMonth, range);
+  });
+  const summary = {
+    total: rangedNotifications.length,
+    registered: rangedNotifications.filter((item) => item.__status === 'registered').length,
+    missing: rangedNotifications.filter((item) => item.__status === 'missing').length
+  };
+  const targetTypeLabels = {
+    kr: 'KR',
+    sub_kr: 'Sub-KR',
+    initiative: 'Initiative'
+  };
+  const valueLabelByType = {
+    kr: '실적값',
+    sub_kr: '실적값',
+    initiative: '진행률(%)'
+  };
+  const statusLabelByType = {
+    registered: '실적 등록',
+    missing: '미등록'
+  };
 
-    const monthFilterOptions = (() => {
-      const options = ['<option value="">전체</option>'];
-      for (let i = 0; i < 12; i += 1) {
-        const cursor = new Date(currentMonth + '-01');
-        cursor.setMonth(cursor.getMonth() - i);
-        const value = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
-        options.push(`<option value="${value}" ${value === monthFilter ? 'selected' : ''}>${value}</option>`);
-      }
-      return options.join('');
-    })();
-
-    el.pageContent.innerHTML = `
-      <section class="card panel">
-        <div class="section-head-inline">
-          <h3>월 실적 알림</h3>
-          <div>
-            <select id="notificationMonthFilter">
-              ${monthFilterOptions}
-            </select>
-            <select id="notificationStatusFilter">
-              <option value="all">전체</option>
-              <option value="registered">실적 등록</option>
-              <option value="missing">미등록</option>
-            </select>
-          </div>
-        </div>
-        <div class="grid-3" style="margin-bottom:12px;">
-          <div class="stat"><p class="k">전체</p><p class="v">${summary.total || 0}</p></div>
-          <div class="stat"><p class="k">실적 등록</p><p class="v">${summary.registered || 0}</p></div>
-          <div class="stat"><p class="k">미등록</p><p class="v">${summary.missing || 0}</p></div>
-        </div>
-        ${normalizedNotifications.length === 0
+  el.pageContent.innerHTML = `
+    <section class="card panel">
+      <div class="section-head-inline">
+        <h3>월 실적 알림</h3>
+      </div>
+      <div class="grid-3" style="margin-bottom:12px;">
+        <div class="stat"><p class="k">전체</p><p class="v">${summary.total || 0}</p></div>
+        <div class="stat"><p class="k">실적 등록</p><p class="v">${summary.registered || 0}</p></div>
+        <div class="stat"><p class="k">미등록</p><p class="v">${summary.missing || 0}</p></div>
+      </div>
+      ${rangedNotifications.length === 0
       ? '<div class="empty">현재 기준 알림이 없습니다.</div>'
       : `<div class="table-wrap">
               <table class="data-table">
                 <thead><tr><th>대상</th><th>대상명</th><th>담당조직</th><th>담당자</th><th>미입력 월</th><th>상태</th><th>액션</th></tr></thead>
                 <tbody>
-                  ${normalizedNotifications
+                  ${rangedNotifications
                     .map(
                       (item) => `<tr data-notification-row data-status="${esc(item.__status || item.status || '')}">
                           <td>${esc(targetTypeLabels[item.targetType] || item.targetType || '-')}</td>
@@ -4125,73 +5137,60 @@ async function renderAdminNotifications() {
               </table>
             </div>`
         }
-      </section>
-    `;
+    </section>
+  `;
 
-    const filter = document.getElementById('notificationStatusFilter');
-    const monthInput = document.getElementById('notificationMonthFilter');
-    if (filter) {
-      filter.value = statusFilter;
-    }
+  el.pageContent.querySelectorAll('[data-noti-jump]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetType = String(button.dataset.targetType || '').trim();
+      const targetId = String(button.dataset.targetId || '').trim();
+      const parentKrId = String(button.dataset.parentKr || '').trim();
+      if (targetType === 'kr' && targetId) {
+        state.selectedKrId = targetId;
+        state.selectedSubKrId = null;
+        navigate('/goals/krs');
+        return;
+      }
+      if (targetType === 'sub_kr' && targetId) {
+        state.selectedKrId = parentKrId || state.selectedKrId || null;
+        state.selectedSubKrId = targetId;
+        navigate('/goals/krs');
+        return;
+      }
+      if (targetType === 'initiative' && targetId) {
+        state.selectedInitiativeId = targetId;
+        state.selectedSubKrId = null;
+        navigate('/goals/initiatives');
+      }
+    });
+  });
 
-    if (filter) {
-      filter.addEventListener('change', render);
-    }
-    if (monthInput) {
-      monthInput.addEventListener('change', render);
-    }
-
-    el.pageContent.querySelectorAll('[data-noti-jump]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const targetType = String(button.dataset.targetType || '').trim();
-        const targetId = String(button.dataset.targetId || '').trim();
-        const parentKrId = String(button.dataset.parentKr || '').trim();
-        if (targetType === 'kr' && targetId) {
-          state.selectedKrId = targetId;
-          navigate('/goals/krs');
-          return;
-        }
-        if (targetType === 'sub_kr' && parentKrId) {
-          state.selectedKrId = parentKrId;
-          navigate('/goals/krs');
-          return;
-        }
-        if (targetType === 'initiative' && targetId) {
-          state.selectedInitiativeId = targetId;
-          navigate('/goals/initiatives');
-        }
+  el.pageContent.querySelectorAll('[data-noti-update]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetType = String(button.dataset.targetType || '').trim();
+      const targetId = String(button.dataset.targetId || '').trim();
+      const yearMonth = String(button.dataset.ym || '').trim();
+      if (!targetType || !targetId || !yearMonth) return;
+      const valueLabel = valueLabelByType[targetType] || '실적값';
+      const extra = targetType === 'initiative'
+        ? { min: 0, max: 100, description: 'Initiative 진행률(%)을 월 단위로 입력합니다.' }
+        : {};
+      openMonthlyUpdateModal({
+        title: '월 실적 업데이트',
+        description: extra.description || '월 단위 실적을 입력합니다.',
+        targetType,
+        targetId,
+        valueLabel,
+        valuePlaceholder: valueLabel === '진행률(%)' ? '0~100' : '입력',
+        min: extra.min,
+        max: extra.max,
+        defaultYearMonth: yearMonth,
+        step: '0.01',
+        isEdit: true,
+        successMessage: '월 실적이 저장되었습니다.'
       });
     });
-
-    el.pageContent.querySelectorAll('[data-noti-update]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const targetType = String(button.dataset.targetType || '').trim();
-        const targetId = String(button.dataset.targetId || '').trim();
-        const yearMonth = String(button.dataset.ym || '').trim();
-        if (!targetType || !targetId || !yearMonth) return;
-        const valueLabel = valueLabelByType[targetType] || '실적값';
-        const extra = targetType === 'initiative'
-          ? { min: 0, max: 100, description: 'Initiative 진행률(%)을 월 단위로 입력합니다.' }
-          : {};
-        openMonthlyUpdateModal({
-          title: '월 실적 업데이트',
-          description: extra.description || '월 단위 실적을 입력합니다.',
-          targetType,
-          targetId,
-          valueLabel,
-          valuePlaceholder: valueLabel === '진행률(%)' ? '0~100' : '입력',
-          min: extra.min,
-          max: extra.max,
-          defaultYearMonth: yearMonth,
-          step: '0.01',
-          isEdit: true,
-          successMessage: '월 실적이 저장되었습니다.'
-        });
-      });
-    });
-  };
-
-  await render();
+  });
 }
 
 async function renderAdminLogs() {
@@ -4315,7 +5314,6 @@ async function renderAdminLogs() {
 
 async function renderExperiments() {
   const params = new URLSearchParams();
-  if (state.filters.aarrrTag) params.set('aarrrTag', state.filters.aarrrTag);
   if (state.filters.status) params.set('status', state.filters.status);
   const query = params.toString();
   const [experiments, krLinks, initiativeLinks, krs, initiatives, platformExperiments] = await Promise.all([
@@ -4342,9 +5340,42 @@ async function renderExperiments() {
     initiativeByExperiment.get(link.experimentId).push(link);
   });
 
-  function resolveExperimentTargets(experimentId) {
+  const experimentFilters = {
+    owner: String(state.experimentFilters.owner || '').trim(),
+    organization: String(state.filters.division || '').trim(),
+    startMonth: normalizeMonth(state.experimentFilters.startMonth),
+    endMonth: normalizeMonth(state.experimentFilters.endMonth)
+  };
+  const parsedOrganization = (() => {
+    const raw = experimentFilters.organization;
+    if (!raw) return { type: '', value: '' };
+    if (raw.startsWith('division::')) return { type: 'division', value: raw.slice('division::'.length) };
+    if (raw.startsWith('team::')) return { type: 'team', value: raw.slice('team::'.length) };
+    return { type: '', value: raw };
+  })();
+  const experimentRange = state.experimentRange || { preset: 'all', from: '', to: '' };
+
+  function resolveExperimentContext(experimentId) {
     const targets = [];
     const dedupe = new Set();
+    const divisions = [];
+    const teams = [];
+    const owners = [];
+    const addOrganization = (division, team) => {
+      const normalizedDivision = String(division || '').trim();
+      const normalizedTeam = String(team || '').trim();
+      if (normalizedDivision) {
+        if (!divisions.includes(normalizedDivision)) divisions.push(normalizedDivision);
+      }
+      if (normalizedTeam) {
+        if (!teams.includes(normalizedTeam)) teams.push(normalizedTeam);
+      }
+    };
+    const addOwner = (owner) => {
+      const normalizedOwner = String(owner || '').trim();
+      if (!normalizedOwner) return;
+      if (!owners.includes(normalizedOwner)) owners.push(normalizedOwner);
+    };
 
     (initiativeByExperiment.get(experimentId) || []).forEach((link) => {
       const initiative = initiativeMap.get(link.initiativeId);
@@ -4358,6 +5389,8 @@ async function renderExperiments() {
         label: initiative.title,
         sortKey: String(link.updatedAt || link.createdAt || '')
       });
+      addOrganization(initiative.division, initiative.team);
+      addOwner(initiative.owner);
     });
 
     (krByExperiment.get(experimentId) || []).forEach((link) => {
@@ -4372,17 +5405,26 @@ async function renderExperiments() {
         label: kr.title,
         sortKey: String(link.updatedAt || link.createdAt || '')
       });
+      addOrganization(kr.division, kr.team);
+      addOwner(kr.owner);
     });
 
     targets.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
-    return targets;
+    return { targets, divisions, teams, owners };
   }
 
   const normalizedSearch = String(state.searchQuery || '').trim().toLowerCase();
   const filteredRows = experiments
     .map((exp) => {
-      const targets = resolveExperimentTargets(exp.id);
+      const context = resolveExperimentContext(exp.id);
+      const targets = context.targets;
+      const divisions = context.divisions;
+      const teams = context.teams;
+      const targetOwners = context.owners;
+      const startMonth = normalizeMonth(exp.startDate);
+      const endMonth = normalizeMonth(exp.endDate);
       const targetLabels = targets.map((item) => `${item.type === 'kr' ? 'KR' : 'Initiative'}: ${item.label}`);
+      const owner = String(exp.owner || '').trim() || targetOwners[0] || '';
       const searchBlob = [
         exp.title,
         exp.status,
@@ -4390,14 +5432,49 @@ async function renderExperiments() {
         exp.startDate,
         exp.endDate,
         exp.result,
-        exp.owner,
+        owner,
         ...targetLabels
       ]
         .map((item) => String(item || '').toLowerCase())
         .join(' ');
-      return { exp, targets, searchBlob };
+      return {
+        exp,
+        targets,
+        divisions,
+        teams,
+        startMonth,
+        endMonth,
+        owner,
+        targetOwners,
+        searchBlob
+      };
     })
-    .filter((row) => !normalizedSearch || row.searchBlob.includes(normalizedSearch));
+    .filter((row) => {
+      if (normalizedSearch && !row.searchBlob.includes(normalizedSearch)) return false;
+      if (experimentFilters.owner && row.owner !== experimentFilters.owner && !(row.targetOwners || []).includes(experimentFilters.owner)) return false;
+      if (experimentFilters.startMonth && row.startMonth !== experimentFilters.startMonth) return false;
+      if (experimentFilters.endMonth && row.endMonth !== experimentFilters.endMonth) return false;
+      if (String(experimentRange.preset || 'all') !== 'all') {
+        const experimentStart = parseDateOnly(row.exp.startDate);
+        const experimentEnd = parseDateOnly(row.exp.endDate) || experimentStart;
+        const rangeFrom = parseDateOnly(experimentRange.from);
+        const rangeTo = parseDateOnly(experimentRange.to);
+        if (rangeFrom && experimentEnd && experimentEnd < rangeFrom) return false;
+        if (rangeTo && experimentStart && experimentStart > rangeTo) return false;
+      }
+      if (parsedOrganization.value) {
+        if (parsedOrganization.type === 'division' && !row.divisions.includes(parsedOrganization.value)) return false;
+        if (parsedOrganization.type === 'team' && !row.teams.includes(parsedOrganization.value)) return false;
+        if (
+          !parsedOrganization.type &&
+          !row.divisions.includes(parsedOrganization.value) &&
+          !row.teams.includes(parsedOrganization.value)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
   const totalRows = filteredRows.length;
   const experimentTotalPages = Math.max(1, Math.ceil(totalRows / state.experimentPageSize));
   const safeExperimentPage = Math.min(Math.max(1, state.experimentPage), experimentTotalPages);
@@ -4446,13 +5523,13 @@ async function renderExperiments() {
               ${tableRows
                 .map(
                   (row) => `<tr>
-                    <td class="exp-col-title"><button class="table-link-btn exp-title-link" type="button" data-edit-experiment="${esc(row.exp.id)}">${esc(row.exp.title)}</button></td>
+                    <td class="exp-col-title"><button class="table-link-btn exp-title-link" type="button" data-exp-platform-link="${esc(row.exp.id)}">${esc(row.exp.title)}</button></td>
                     <td class="exp-col-status">${statusBadge(row.exp.status)}</td>
                     <td class="exp-col-hypothesis"><span class="exp-two-line-text">${esc(row.exp.hypothesis || '-')}</span></td>
                     <td class="exp-col-date">${esc(row.exp.startDate || '-')}</td>
                     <td class="exp-col-date">${esc(row.exp.endDate || '-')}</td>
                     <td class="exp-col-result"><span class="exp-one-line-text">${esc(row.exp.result || '-')}</span></td>
-                    <td class="exp-col-owner">${esc(row.exp.owner || '-')}</td>
+                    <td class="exp-col-owner">${esc(row.owner || '-')}</td>
                     <td class="exp-col-parent">
                     ${row.targets.length === 0
                         ? '-'
@@ -4462,15 +5539,16 @@ async function renderExperiments() {
                                 (target) =>
                                   `<button class="exp-parent-link" type="button" data-parent-type="${esc(
                                     target.type
-                                  )}" data-parent-id="${esc(target.id)}" title="${esc(target.label)}">${esc(
-                                    `${target.type === 'kr' ? 'KR: ' : 'Initiative: '}${target.label}`
-                                  )}</button>`
+                                  )}" data-parent-id="${esc(target.id)}" title="${esc(target.label)}">
+                                    <span class="exp-parent-kind">${esc(target.type === 'kr' ? 'KR' : 'Initiative')}</span>
+                                    <span class="exp-parent-title">${esc(target.label)}</span>
+                                  </button>`
                               )
                               .join('')}
                           </div>`
                     }</td>
                     <td class="exp-col-action">
-                      <button class="btn ghost table-inline-btn" type="button" data-delete-experiment="${esc(row.exp.id)}" data-experiment-title="${esc(row.exp.title)}">삭제</button>
+                      <button class="btn secondary table-inline-btn" type="button" data-edit-experiment="${esc(row.exp.id)}">수정</button>
                     </td>
                   </tr>`
                 )
@@ -4516,12 +5594,32 @@ async function renderExperiments() {
     });
   }
 
+  el.pageContent.querySelectorAll('[data-exp-platform-link]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const experimentId = String(button.dataset.expPlatformLink || '').trim();
+      if (!experimentId) return;
+      openLayerModal({
+        title: '실험플랫폼 링크 연결',
+        description: '아직 실험플랫폼 URL이 연결되지 않았습니다.',
+        bodyHtml: `
+          <div class="field-row">
+            <p>실험 ID: ${esc(experimentId)}</p>
+            <small class="field-help">추후 URL 연결 기능이 제공될 예정입니다.</small>
+          </div>
+        `,
+        submitLabel: '닫기',
+        showCancel: false,
+        onSubmit: async () => {}
+      });
+    });
+  });
+
   el.pageContent.querySelectorAll('[data-edit-experiment]').forEach((button) => {
         button.addEventListener('click', () => {
       const experimentId = button.dataset.editExperiment;
       const experiment = experimentMap.get(experimentId);
       if (!experiment) return;
-      const selectedTargets = resolveExperimentTargets(experimentId);
+      const selectedTargets = resolveExperimentContext(experimentId).targets;
       const selectedTarget = selectedTargets[0];
       openExperimentModal({
         mode: 'edit',
@@ -4542,6 +5640,7 @@ async function renderExperiments() {
       if (!targetId) return;
       if (targetType === 'kr') {
         state.selectedKrId = targetId;
+        state.selectedSubKrId = null;
         navigate('/goals/krs');
         return;
       }
@@ -4552,22 +5651,6 @@ async function renderExperiments() {
     });
   });
 
-  el.pageContent.querySelectorAll('[data-delete-experiment]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      const experimentId = String(button.dataset.deleteExperiment || '').trim();
-      const experimentTitle = String(button.dataset.experimentTitle || '').trim();
-      if (!experimentId) return;
-      try {
-        await confirmDeleteAndRefresh({
-          path: `/api/experiments/${encodeURIComponent(experimentId)}`,
-          label: experimentTitle,
-          reason: 'delete experiment from experiment list page'
-        });
-      } catch (err) {
-        showToast(err.message, true);
-      }
-    });
-  });
 }
 
 async function renderIntegrationDwh() {
@@ -4631,6 +5714,15 @@ function bindTopbarActions() {
   el.btnResetFilters.addEventListener('click', async () => {
     state.searchQuery = '';
     state.filters = { division: '', domain: '', team: '', aarrrTag: '', status: '' };
+    state.experimentFilters = {
+      owner: '',
+      startMonth: '',
+      endMonth: ''
+    };
+    state.notificationMonthFilter = '';
+    state.notificationStatusFilter = 'all';
+    state.notificationRange = { preset: 'all', from: '', to: '' };
+    state.experimentRange = { preset: 'all', from: '', to: '' };
     state.tablePage = 1;
     state.experimentPage = 1;
     applyStateToFilterInputs();
@@ -4651,9 +5743,13 @@ async function bootstrap() {
   applyStateToFilterInputs();
   bindTopbarActions();
   bindSidebarToggle();
+  bindBrandHome();
 
   window.addEventListener('hashchange', async () => {
-    state.route = currentRoute();
+    const nextRoute = currentRoute();
+    if (nextRoute === state.route) return;
+    state.route = nextRoute;
+    await hydrateTaxonomy();
     await renderCurrentRoute();
   });
 

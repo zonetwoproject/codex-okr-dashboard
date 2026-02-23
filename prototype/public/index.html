@@ -21,10 +21,16 @@
 
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand-block">
-          <p id="brandEyebrow" class="brand-eyebrow">Prototype</p>
-          <h1>OKR Dashboard</h1>
-          <p id="brandSub" class="brand-sub">전사 OKR/Input 대시보드</p>
+        <div
+          id="btnBrandHome"
+          class="brand-block brand-home-link"
+          role="button"
+          tabindex="0"
+          aria-label="기본 진입 화면으로 이동"
+          title="Dashboard / Executive로 이동"
+        >
+          <p id="brandEyebrow" class="brand-eyebrow">Prototype Mark2</p>
+          <h1>배민 <span class="brand-accent">OKR</span> 어드민</h1>
         </div>
         <nav id="navTree" class="nav-tree"></nav>
       </aside>
@@ -34,16 +40,24 @@
           <div class="topbar-head">
             <button id="btnSidebarToggle" class="sidebar-toggle" aria-label="왼쪽 메뉴 접기" aria-expanded="true" title="왼쪽 메뉴 접기">⟨</button>
             <div class="topbar-title">
-              <h2 id="pageTitle">Dashboard / Executive</h2>
-              <p id="pageDesc">조직 전체 OKR 신호와 리스크를 확인합니다.</p>
+              <h2>배민 OKR 어드민</h2>
             </div>
             <div id="topbarActions" class="topbar-actions"></div>
           </div>
+        </header>
 
+        <section class="route-intro">
+          <p id="pageBreadcrumb" class="route-breadcrumb">Dashboard > Executive</p>
+          <h1 id="pageTitle">Dashboard / Executive</h1>
+          <p id="pageDesc">조직 전체 OKR 신호와 리스크를 확인합니다.</p>
+        </section>
+
+        <section class="filter-panel card">
           <div class="search-toolbar">
-            <input id="searchKeyword" type="text" placeholder="검색어 입력 (제목, 설명, 팀, owner 등)" />
-            <button id="btnSearch" class="btn">검색</button>
+            <label for="searchKeyword">검색어</label>
+            <input id="searchKeyword" type="text" placeholder="검색어를 입력하세요" />
           </div>
+          <div id="filterChipRows" class="filter-chip-rows hidden"></div>
 
           <div class="filter-grid">
             <div>
@@ -91,12 +105,46 @@
                 <option value="red">🔴 위험</option>
               </select>
             </div>
-            <div class="filter-actions">
-              <button id="btnApplyFilters" class="btn">필터 적용</button>
-              <button id="btnResetFilters" class="btn icon-btn" aria-label="필터 초기화" title="필터 초기화">↺</button>
+            <div>
+              <label for="filterNotificationMonth">월</label>
+              <select id="filterNotificationMonth">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterNotificationStatus">알림 상태</label>
+              <select id="filterNotificationStatus">
+                <option value="all">전체</option>
+                <option value="registered">실적 등록</option>
+                <option value="missing">미등록</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterOwner">담당자</label>
+              <select id="filterOwner">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterExperimentStartMonth">실험 시작 월</label>
+              <select id="filterExperimentStartMonth">
+                <option value="">전체</option>
+              </select>
+            </div>
+            <div>
+              <label for="filterExperimentEndMonth">실험 종료 월</label>
+              <select id="filterExperimentEndMonth">
+                <option value="">전체</option>
+              </select>
             </div>
           </div>
-        </header>
+
+          <div class="filter-actions">
+            <button id="btnResetFilters" class="btn secondary" aria-label="필터 초기화" title="필터 초기화">초기화</button>
+            <button id="btnSearch" class="btn">검색</button>
+            <button id="btnApplyFilters" class="btn hidden">필터 적용</button>
+          </div>
+        </section>
 
         <main id="pageContent" class="content-area"></main>
       </section>

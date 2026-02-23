@@ -6,10 +6,12 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "node src/server.js",
-    "start:render": "sh -c 'if [ -n \"$DATA_FILE\" ] && [ ! -f \"$DATA_FILE\" ]; then node scripts/seed.js; fi; node src/server.js'",
+    "start:render": "node src/server.js",
     "seed": "node scripts/seed.js",
     "sync:to-supabase": "node scripts/sync-to-supabase.js",
     "sync:from-supabase": "node scripts/sync-from-supabase.js",
+    "backfill:presets": "node scripts/backfill-presets-from-data.js",
+    "backfill:presets:apply": "node scripts/backfill-presets-from-data.js --apply",
     "migrate:remove-kr-metrictype": "node scripts/migrate-remove-kr-metrictype.js",
     "migrate:remove-initiative-statusscore": "node scripts/migrate-remove-initiative-statusscore.js",
     "migrate:experiment-single-parent": "node scripts/migrate-experiment-single-parent.js",

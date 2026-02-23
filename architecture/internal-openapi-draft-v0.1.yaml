@@ -1,0 +1,1019 @@
+openapi: 3.0.3
+info:
+  title: OKR Admin Internal API
+  version: 0.1.0-draft
+  description: |
+    사내 내재화용 OKR Admin API 초안.
+    인증은 사내 SSO 게이트웨이 이후 Bearer 토큰 기준으로 가정한다.
+servers:
+  - url: https://okr-admin-api.internal.company
+security:
+  - bearerAuth: []
+tags:
+  - name: Objectives
+  - name: KRs
+  - name: SubKRs
+  - name: Initiatives
+  - name: Experiments
+  - name: MonthlyPerformances
+  - name: Inputs
+  - name: Dashboard
+  - name: Admin
+  - name: Logs
+
+paths:
+  /v1/objectives:
+    get:
+      tags: [Objectives]
+      summary: Objective 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/Half'
+        - $ref: '#/components/parameters/Year'
+        - $ref: '#/components/parameters/Division'
+        - $ref: '#/components/parameters/Domain'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Objective'
+    post:
+      tags: [Objectives]
+      summary: Objective 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateObjectiveRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Objective'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /v1/objectives/{objectiveId}:
+    patch:
+      tags: [Objectives]
+      summary: Objective 수정
+      parameters:
+        - $ref: '#/components/parameters/ObjectiveId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateObjectiveRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Objective'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Objectives]
+      summary: Objective 삭제(soft-delete)
+      parameters:
+        - $ref: '#/components/parameters/ObjectiveId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/krs:
+    get:
+      tags: [KRs]
+      summary: KR 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/ObjectiveIdQuery'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Division'
+        - $ref: '#/components/parameters/Domain'
+        - $ref: '#/components/parameters/Team'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KR'
+    post:
+      tags: [KRs]
+      summary: KR 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKRRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KR'
+
+  /v1/krs/{krId}:
+    patch:
+      tags: [KRs]
+      summary: KR 수정
+      parameters:
+        - $ref: '#/components/parameters/KrId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKRRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KR'
+    delete:
+      tags: [KRs]
+      summary: KR 삭제(soft-delete)
+      parameters:
+        - $ref: '#/components/parameters/KrId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/sub-krs:
+    get:
+      tags: [SubKRs]
+      summary: Sub-KR 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/KrIdQuery'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Division'
+        - $ref: '#/components/parameters/Domain'
+        - $ref: '#/components/parameters/Team'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubKR'
+    post:
+      tags: [SubKRs]
+      summary: Sub-KR 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubKRRequest'
+      responses:
+        '201':
+          description: Created
+
+  /v1/sub-krs/{subKrId}:
+    patch:
+      tags: [SubKRs]
+      summary: Sub-KR 수정
+      parameters:
+        - $ref: '#/components/parameters/SubKrId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubKRRequest'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [SubKRs]
+      summary: Sub-KR 삭제
+      parameters:
+        - $ref: '#/components/parameters/SubKrId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Deleted
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/initiatives:
+    get:
+      tags: [Initiatives]
+      summary: Initiative 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/SubKrIdQuery'
+        - $ref: '#/components/parameters/Status'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Initiative'
+    post:
+      tags: [Initiatives]
+      summary: Initiative 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInitiativeRequest'
+      responses:
+        '201':
+          description: Created
+
+  /v1/initiatives/{initiativeId}:
+    patch:
+      tags: [Initiatives]
+      summary: Initiative 수정
+      parameters:
+        - $ref: '#/components/parameters/InitiativeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInitiativeRequest'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [Initiatives]
+      summary: Initiative 삭제
+      parameters:
+        - $ref: '#/components/parameters/InitiativeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Deleted
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/experiments:
+    get:
+      tags: [Experiments]
+      summary: Experiment 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/AarrrTag'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Experiment'
+    post:
+      tags: [Experiments]
+      summary: Experiment 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExperimentRequest'
+      responses:
+        '201':
+          description: Created
+
+  /v1/experiments/{experimentId}:
+    patch:
+      tags: [Experiments]
+      summary: Experiment 수정
+      parameters:
+        - $ref: '#/components/parameters/ExperimentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateExperimentRequest'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [Experiments]
+      summary: Experiment 삭제
+      parameters:
+        - $ref: '#/components/parameters/ExperimentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Deleted
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/experiments/{experimentId}/mapping:
+    put:
+      tags: [Experiments]
+      summary: 실험 단일 타깃 매핑 교체
+      description: 실험 1건당 KR 또는 Initiative 중 1개만 허용
+      parameters:
+        - $ref: '#/components/parameters/ExperimentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertExperimentMappingRequest'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperimentMapping'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /v1/monthly-performances:upsert:
+    post:
+      tags: [MonthlyPerformances]
+      summary: 월 실적 upsert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertMonthlyPerformanceRequest'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonthlyPerformance'
+
+  /v1/input-sources:
+    get:
+      tags: [Inputs]
+      summary: Input Source 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Team'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InputSource'
+    post:
+      tags: [Inputs]
+      summary: Input Source 등록
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInputSourceRequest'
+      responses:
+        '201':
+          description: Created
+
+  /v1/input-sources/{inputSourceId}:process:
+    post:
+      tags: [Inputs]
+      summary: Input Source 과제화 처리
+      parameters:
+        - $ref: '#/components/parameters/InputSourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessInputSourceRequest'
+      responses:
+        '200':
+          description: Processed
+
+  /v1/dashboard/notifications:
+    get:
+      tags: [Dashboard]
+      summary: 월 실적 알림 조회
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [registered, missing]
+        - name: yearMonth
+          in: query
+          schema:
+            type: string
+            pattern: '^\\d{4}-\\d{2}$'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+
+  /v1/admin/presets:
+    get:
+      tags: [Admin]
+      summary: Preset 조회
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresetResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/presets/items:
+    post:
+      tags: [Admin]
+      summary: Preset 값 추가
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePresetItemRequest'
+      responses:
+        '201':
+          description: Created
+
+  /v1/audit-logs:
+    get:
+      tags: [Logs]
+      summary: 감사 로그 조회
+      parameters:
+        - name: entityType
+          in: query
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLog'
+
+  /v1/decision-logs:
+    get:
+      tags: [Logs]
+      summary: 의사결정 로그 조회
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Logs]
+      summary: 의사결정 로그 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDecisionLogRequest'
+      responses:
+        '201':
+          description: Created
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ObjectiveId:
+      name: objectiveId
+      in: path
+      required: true
+      schema: { type: string }
+    KrId:
+      name: krId
+      in: path
+      required: true
+      schema: { type: string }
+    SubKrId:
+      name: subKrId
+      in: path
+      required: true
+      schema: { type: string }
+    InitiativeId:
+      name: initiativeId
+      in: path
+      required: true
+      schema: { type: string }
+    ExperimentId:
+      name: experimentId
+      in: path
+      required: true
+      schema: { type: string }
+    InputSourceId:
+      name: inputSourceId
+      in: path
+      required: true
+      schema: { type: string }
+    ObjectiveIdQuery:
+      name: objectiveId
+      in: query
+      schema: { type: string }
+    KrIdQuery:
+      name: krId
+      in: query
+      schema: { type: string }
+    SubKrIdQuery:
+      name: subKrId
+      in: query
+      schema: { type: string }
+    Half:
+      name: half
+      in: query
+      schema:
+        type: string
+        enum: [H1, H2]
+    Year:
+      name: year
+      in: query
+      schema: { type: integer }
+    Division:
+      name: division
+      in: query
+      schema: { type: string }
+    Domain:
+      name: domain
+      in: query
+      schema: { type: string }
+    Team:
+      name: team
+      in: query
+      schema: { type: string }
+    Query:
+      name: q
+      in: query
+      schema: { type: string }
+    Status:
+      name: status
+      in: query
+      schema: { type: string }
+    AarrrTag:
+      name: aarrrTag
+      in: query
+      schema:
+        type: string
+        enum: ['-', Acquisition, Activation, Retention, Revenue, Referral]
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServiceUnavailable:
+      description: Service Unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    AuditFields:
+      type: object
+      required: [actor, reason]
+      properties:
+        actor: { type: string }
+        reason: { type: string }
+
+    DeleteRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+
+    DeleteResponse:
+      type: object
+      properties:
+        id: { type: string }
+        deleted: { type: boolean }
+
+    Objective:
+      type: object
+      properties:
+        id: { type: string }
+        half: { type: string, enum: [H1, H2] }
+        year: { type: integer }
+        title: { type: string }
+        division: { type: string }
+        team: { type: string }
+        domain: { type: string }
+        aarrrTag: { type: string }
+        status: { type: string }
+
+    KR:
+      type: object
+      properties:
+        id: { type: string }
+        objectiveId: { type: string }
+        title: { type: string }
+        targetValue: { type: number }
+        status:
+          type: string
+          enum: [planned, in_progress, production_released, spec_out, dropped, holding]
+
+    SubKR:
+      type: object
+      properties:
+        id: { type: string }
+        krId: { type: string }
+        title: { type: string }
+        targetValue: { type: number }
+
+    Initiative:
+      type: object
+      properties:
+        id: { type: string }
+        objectiveId: { type: string }
+        krId: { type: string, nullable: true }
+        subKrId: { type: string, nullable: true }
+        title: { type: string }
+        progressQuant: { type: number }
+
+    Experiment:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        aarrrTag: { type: string }
+        status:
+          type: string
+          enum: [before_start, in_progress, winner_selected, ended, discarded]
+        result:
+          type: string
+          enum: ['위너 선정 전', '대조군(A) 위너 선정', '실험군(B) 위너 선정']
+
+    ExperimentMapping:
+      type: object
+      properties:
+        experimentId: { type: string }
+        targetType:
+          type: string
+          enum: [kr, initiative]
+        targetId: { type: string }
+
+    MonthlyPerformance:
+      type: object
+      properties:
+        id: { type: string }
+        targetType:
+          type: string
+          enum: [objective, kr, sub_kr, initiative]
+        targetId: { type: string }
+        yearMonth: { type: string, pattern: '^\\d{4}-\\d{2}$' }
+        actualValue: { type: number }
+        sourceType:
+          type: string
+          enum: [manual, synced, calculated]
+
+    InputSource:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        detail: { type: string }
+        classification: { type: string }
+        product: { type: string }
+        source: { type: string }
+        status:
+          type: string
+          enum: [registered, converted, rejected]
+
+    NotificationItem:
+      type: object
+      properties:
+        targetType: { type: string }
+        targetId: { type: string }
+        targetTitle: { type: string }
+        yearMonth: { type: string }
+        status: { type: string, enum: [registered, missing] }
+
+    NotificationListResponse:
+      type: object
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationItem'
+        summary:
+          type: object
+          properties:
+            total: { type: integer }
+            registered: { type: integer }
+            missing: { type: integer }
+
+    PresetResponse:
+      type: object
+      properties:
+        domains:
+          type: array
+          items: { type: string }
+        divisions:
+          type: array
+          items: { type: string }
+        teams:
+          type: array
+          items: { type: string }
+        inputClassifications:
+          type: array
+          items: { type: string }
+        inputProducts:
+          type: array
+          items: { type: string }
+        inputSources:
+          type: array
+          items: { type: string }
+
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string }
+        actor: { type: string }
+        reason: { type: string }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    CreateObjectiveRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [half, year, title, division, domain]
+          properties:
+            half: { type: string, enum: [H1, H2] }
+            year: { type: integer }
+            title: { type: string }
+            division: { type: string }
+            team: { type: string }
+            domain: { type: string }
+
+    UpdateObjectiveRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          properties:
+            title: { type: string }
+            definition: { type: string }
+            status: { type: string }
+
+    CreateKRRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [objectiveId, title, targetValue]
+          properties:
+            objectiveId: { type: string }
+            title: { type: string }
+            targetValue: { type: number, minimum: 0.01 }
+
+    UpdateKRRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          properties:
+            title: { type: string }
+            targetValue: { type: number, minimum: 0.01 }
+            status: { type: string }
+
+    CreateSubKRRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [krId, title, targetValue]
+          properties:
+            krId: { type: string }
+            title: { type: string }
+            targetValue: { type: number, minimum: 0.01 }
+
+    UpdateSubKRRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          properties:
+            title: { type: string }
+            targetValue: { type: number, minimum: 0.01 }
+            status: { type: string }
+
+    CreateInitiativeRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [title]
+          properties:
+            objectiveId: { type: string }
+            krId: { type: string }
+            subKrId: { type: string }
+            title: { type: string }
+            progressQuant: { type: number, minimum: 0, maximum: 100 }
+
+    UpdateInitiativeRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          properties:
+            status: { type: string }
+            progressQuant: { type: number, minimum: 0, maximum: 100 }
+
+    CreateExperimentRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [title, aarrrTag]
+          properties:
+            title: { type: string }
+            aarrrTag: { type: string }
+            status: { type: string }
+            result: { type: string }
+            platformExperimentId: { type: string }
+
+    UpdateExperimentRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          properties:
+            title: { type: string }
+            status: { type: string }
+            result: { type: string }
+
+    UpsertExperimentMappingRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [targetType, targetId]
+          properties:
+            targetType:
+              type: string
+              enum: [kr, initiative]
+            targetId: { type: string }
+            weight:
+              type: number
+              minimum: 0
+              maximum: 100
+
+    UpsertMonthlyPerformanceRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [targetType, targetId, yearMonth, actualValue]
+          properties:
+            targetType:
+              type: string
+              enum: [objective, kr, sub_kr, initiative]
+            targetId: { type: string }
+            yearMonth: { type: string, pattern: '^\\d{4}-\\d{2}$' }
+            actualValue: { type: number }
+            sourceType:
+              type: string
+              enum: [manual, synced, calculated]
+
+    CreateInputSourceRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [title, detail, team, classification, product, source]
+          properties:
+            title: { type: string }
+            detail: { type: string }
+            team: { type: string }
+            classification: { type: string }
+            product: { type: string }
+            source: { type: string }
+
+    ProcessInputSourceRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [decision]
+          properties:
+            decision:
+              type: string
+              enum: [convert, reject]
+            goalType:
+              type: string
+              enum: [kr, sub_kr, initiative]
+            goalId: { type: string }
+            rejectionReason: { type: string }
+
+    CreatePresetItemRequest:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [presetType, value]
+          properties:
+            presetType:
+              type: string
+              enum: [domains, divisions, teams, inputClassifications, inputProducts, inputSources]
+            value: { type: string }
+            division: { type: string }
+
+    CreateDecisionLogRequest:
+      type: object
+      required: [title, context, decision, actor]
+      properties:
+        title: { type: string }
+        context: { type: string }
+        decision: { type: string }
+        actor: { type: string }

@@ -203,10 +203,47 @@ create table if not exists preset_values (
 
 create unique index if not exists uq_preset_type_value on preset_values(preset_type, value);
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chk_preset_values_type'
+      and conrelid = 'preset_values'::regclass
+  ) then
+    alter table preset_values
+      add constraint chk_preset_values_type check (
+        preset_type in ('divisions', 'domains', 'teams', 'inputClassifications', 'inputProducts', 'inputSources')
+      );
+  end if;
+end
+$$;
+
 create table if not exists preset_team_divisions (
   team text primary key,
   division text not null
 );
+
+create or replace view preset_required_counts as
+with required_types(preset_type) as (
+  values
+    ('domains'::text),
+    ('divisions'::text),
+    ('inputClassifications'::text),
+    ('inputProducts'::text),
+    ('inputSources'::text)
+),
+counts as (
+  select preset_type, count(*)::integer as value_count
+  from preset_values
+  group by preset_type
+)
+select
+  required_types.preset_type,
+  coalesce(counts.value_count, 0) as value_count,
+  (coalesce(counts.value_count, 0) > 0) as is_ready
+from required_types
+left join counts on counts.preset_type = required_types.preset_type;
 
 create index if not exists idx_krs_objective_id on krs(objective_id);
 create index if not exists idx_sub_krs_kr_id on sub_krs(kr_id);
