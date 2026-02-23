@@ -1,10 +1,8 @@
-const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
 const port = 4011;
 const base = `http://127.0.0.1:${port}`;
-const tempFile = path.join('/tmp', `okr-proto-smoke-${Date.now()}.json`);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,12 +41,18 @@ async function post(pathname, payload) {
 }
 
 async function run() {
+  const now = new Date();
+  const currentYear = now.getUTCFullYear();
+  const currentMonth = now.getUTCMonth() + 1; // 1..12
+  const safeDisplayMonthForH1 = currentMonth <= 6 ? Math.max(1, currentMonth) : 6;
+  const expectedCurrentField = safeDisplayMonthForH1 <= 3 ? 'q1Current' : 'q2Current';
+  const janYearMonth = `${currentYear}-01`;
+
   const child = spawn('node', ['src/server.js'], {
     cwd: path.join(__dirname, '..'),
     env: {
       ...process.env,
-      PORT: String(port),
-      DATA_FILE: tempFile
+      PORT: String(port)
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -58,13 +62,21 @@ async function run() {
 
   try {
     await waitForServer();
+    const taxonomyRes = await fetch(`${base}/api/admin/taxonomy`);
+    const taxonomy = await taxonomyRes.json();
+    assert(taxonomyRes.ok, `taxonomy endpoint must succeed: ${JSON.stringify(taxonomy)}`);
+    const division = Array.isArray(taxonomy.divisions) ? String(taxonomy.divisions[0] || '').trim() : '';
+    const domain = Array.isArray(taxonomy.domains) ? String(taxonomy.domains[0] || '').trim() : '';
+    const team = Array.isArray(taxonomy.teams) ? String(taxonomy.teams[0] || '').trim() : '';
+    assert(division, 'taxonomy should provide at least one division');
+    assert(domain, 'taxonomy should provide at least one domain');
 
     const objective = await post('/api/objectives', {
       half: 'H1',
-      year: 2026,
+      year: currentYear,
       title: 'Smoke Objective',
-      division: '코어프로덕트실',
-      domain: 'QC',
+      division,
+      domain,
       aarrrTag: '-',
       baseline: 10,
       q1Target: 30,
@@ -83,7 +95,7 @@ async function run() {
       q1Target: 40,
       q2Target: 80,
       ownerScope: 'team',
-      team: 'QA Team',
+      team: team || 'QA Team',
       aarrrTag: 'Activation',
       actor: 'qa.user',
       reason: 'smoke create kr'
@@ -107,7 +119,7 @@ async function run() {
     await post('/api/monthly-performances/upsert', {
       targetType: 'kr',
       targetId: kr.id,
-      yearMonth: '2026-01',
+      yearMonth: janYearMonth,
       actualValue: 40,
       sourceType: 'manual',
       actor: 'qa.user',
@@ -117,7 +129,7 @@ async function run() {
     await post('/api/monthly-performances/upsert', {
       targetType: 'kr',
       targetId: kr.id,
-      yearMonth: '2026-01',
+      yearMonth: janYearMonth,
       actualValue: 60,
       sourceType: 'synced',
       actor: 'qa.user',
@@ -165,7 +177,7 @@ async function run() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          month: 6,
+          month: safeDisplayMonthForH1,
           value: 88,
           sourceType: 'manual',
           actor: 'qa.user',
@@ -175,15 +187,15 @@ async function run() {
     );
     const tableUpsert = await tableUpsertRes.json();
     assert(tableUpsertRes.ok, 'okr table monthly upsert should succeed');
-    assert(Math.round(tableUpsert.row.q2Current) === 88, 'q2 current should reflect table upsert');
+    assert(
+      Math.round(Number(tableUpsert.row[expectedCurrentField] || 0)) === 88,
+      `${expectedCurrentField} should reflect table upsert`
+    );
 
     console.log('Smoke test passed');
   } finally {
     child.kill('SIGTERM');
     await sleep(100);
-    if (fs.existsSync(tempFile)) {
-      fs.unlinkSync(tempFile);
-    }
   }
 }
 

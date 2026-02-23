@@ -1,8 +1,6 @@
 const express = require('express');
 const path = require('path');
 const {
-  readStore,
-  writeStore,
   addAuditLog,
   computeKRDashboard,
   id,
@@ -23,18 +21,15 @@ const {
 } = require('./validation');
 const {
   isEnabled: isSupabaseEnabled,
-  baseStore,
   loadStoreFromSupabase,
-  saveStoreToSupabase,
   appendAuditLogToSupabase,
   syncStoreMutationToSupabase
 } = require('./supabaseStore');
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
-const dataFile = process.env.DATA_FILE || path.join(__dirname, '../data/store.json');
 let storeCache = null;
-let supabaseSyncQueue = Promise.resolve();
+const REQUIRED_PRESET_TYPES = ['domains', 'divisions', 'inputClassifications', 'inputProducts', 'inputSources'];
 
 const AARRR_STAGES = ['-', 'Acquisition', 'Activation', 'Retention', 'Revenue', 'Referral'];
 const OKR_STATUS_VALUES = new Set([
@@ -72,6 +67,11 @@ const LEGACY_EXPERIMENT_STATUS_MAP = {
   active: 'in_progress',
   running: 'in_progress',
   completed: 'ended',
+  ready_to_start: 'before_start',
+  'ready to start': 'before_start',
+  'ready to review': 'winner_selected',
+  concluded: 'ended',
+  closed: 'discarded',
   시작전: 'before_start',
   진행중: 'in_progress',
   '위너 선정': 'winner_selected',
@@ -278,28 +278,16 @@ function fail(res, code, message) {
 }
 
 function loadStore() {
-  if (storeCache) {
-    return storeCache;
-  }
-  try {
-    storeCache = readStore(dataFile);
-  } catch (error) {
-    console.error('[store-load] failed, fallback to in-memory store:', error.message);
-    storeCache = baseStore();
+  if (!storeCache) {
+    throw new Error('store is not initialized');
   }
   return storeCache;
 }
 
 async function persistStore(store) {
   storeCache = store;
-  try {
-    writeStore(dataFile, store);
-  } catch (error) {
-    // Vercel serverless runtime may not allow writes under deployed source paths.
-    console.error('[store-write] failed, keeping in-memory cache only:', error.message);
-  }
   if (!isSupabaseEnabled()) {
-    return;
+    throw new Error('Supabase configuration is required');
   }
 
   const latestAuditLog =
@@ -307,16 +295,11 @@ async function persistStore(store) {
       ? store.auditLogs[store.auditLogs.length - 1]
       : null;
   if (!latestAuditLog) {
-    const snapshot = JSON.parse(JSON.stringify(store));
-    await saveStoreToSupabase(snapshot);
-    console.log('Synced full store to Supabase');
-    return;
+    throw new Error('latest audit log is required for Supabase delta sync');
   }
 
   const mode = await syncStoreMutationToSupabase(store, latestAuditLog);
-  if (mode !== 'full') {
-    await appendAuditLogToSupabase(latestAuditLog);
-  }
+  await appendAuditLogToSupabase(latestAuditLog);
   console.log(`Synced store mutation to Supabase (${mode})`);
 }
 
@@ -332,44 +315,21 @@ async function persistStoreOrFail(res, store) {
 }
 
 async function bootstrapStore() {
-  let localStore = null;
-  try {
-    localStore = readStore(dataFile);
-  } catch (error) {
-    console.error('[bootstrap-local] failed, fallback to in-memory store:', error.message);
-    localStore = baseStore();
-  }
-  storeCache = localStore;
   if (!isSupabaseEnabled()) {
-    return;
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   }
 
   try {
     const remoteStore = await loadStoreFromSupabase();
-    if (remoteStore) {
-      storeCache = remoteStore;
-      try {
-        writeStore(dataFile, remoteStore);
-      } catch (error) {
-        console.error('[bootstrap-write] failed, continue with in-memory cache:', error.message);
-      }
-      console.log('Loaded initial store from Supabase');
-      return;
+    if (!remoteStore || typeof remoteStore !== 'object') {
+      throw new Error('empty store payload from Supabase');
     }
+    storeCache = remoteStore;
+    console.log('Loaded initial store from Supabase');
+    return;
   } catch (error) {
-    console.error('[supabase-load] failed, fallback to local file:', error.message);
+    throw new Error(`[supabase-load] failed: ${error.message}`);
   }
-
-  // Supabase is configured but empty/unreachable. Keep local store and push it once.
-  const snapshot = JSON.parse(JSON.stringify(storeCache));
-  supabaseSyncQueue = supabaseSyncQueue
-    .then(() => saveStoreToSupabase(snapshot))
-    .then(() => {
-      console.log('Initialized Supabase from local store');
-    })
-    .catch((error) => {
-      console.error('[supabase-init] failed:', error.message);
-    });
 }
 
 function normalizeStringList(values, fallback = []) {
@@ -601,6 +561,21 @@ function parsePresetType(value) {
   return PRESET_FIELD_META[key] ? key : null;
 }
 
+function findMissingRequiredPresetTypes(presets) {
+  const source = presets && typeof presets === 'object' ? presets : {};
+  return REQUIRED_PRESET_TYPES.filter((type) => !Array.isArray(source[type]) || source[type].length === 0);
+}
+
+function ensureRequiredPresets(res, presets) {
+  const missing = findMissingRequiredPresetTypes(presets);
+  if (missing.length === 0) return true;
+  res.status(503).json({
+    error: 'required preset data is missing in Supabase',
+    missingPresetTypes: missing
+  });
+  return false;
+}
+
 function toNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -789,6 +764,362 @@ function getDashboardRows(store, query = {}) {
     .filter(Boolean);
 
   return applyGlobalFilters(rows, query);
+}
+
+function applyExpandedDashboardFilters(rows, query = {}) {
+  const normalizedStatusQuery = query.status && !isSignalStatus(query.status)
+    ? parseOkrStatus(query.status)
+    : null;
+
+  return rows.filter((row) => {
+    if (query.objectiveId && row.objectiveId !== query.objectiveId) return false;
+    if (query.half && row.half !== query.half) return false;
+    if (query.year && Number(row.year) !== Number(query.year)) return false;
+    if (query.division && row.division !== query.division) return false;
+    if (query.teamId && row.division !== query.teamId) return false;
+    if (query.team && row.team !== query.team) return false;
+    if (query.domain && row.domain !== query.domain) return false;
+    if (query.aarrrTag && row.aarrrTag !== normalizeAarrrTag(query.aarrrTag)) return false;
+
+    if (query.status) {
+      if (isSignalStatus(query.status)) {
+        if (row.signal !== query.status) return false;
+      } else {
+        if (!normalizedStatusQuery) return false;
+        if (row.status !== normalizedStatusQuery) return false;
+      }
+    }
+
+    if (query.classification) {
+      const normalizedClassification = normalizeClassificationValue(query.classification);
+      if (!normalizedClassification) return false;
+      if (normalizedClassification !== row.effectiveClassification) return false;
+    }
+
+    if (query.q) {
+      const haystacks = [
+        row.title,
+        row.objectiveTitle,
+        row.division,
+        row.domain,
+        row.team,
+        row.owner,
+        row.status,
+        ...(row.linkedExperimentTitle ? [row.linkedExperimentTitle] : [])
+      ];
+      if (!matchesTextQuery(query.q, haystacks)) return false;
+    }
+
+    return true;
+  });
+}
+
+function getExpandedDashboardRows(store, query = {}) {
+  const maps = buildEntityMaps(store);
+  const experimentContext = buildExperimentLinkContext(store);
+  const baseRows = [
+    ...buildKRRows(store, maps),
+    ...buildSubKRRows(store, maps),
+    ...buildInitiativeRows(store, maps)
+  ];
+
+  const rows = baseRows
+    .map((baseRow) => {
+      const metricRow = enrichTableRowWithMetrics(store, baseRow);
+      const row = {
+        ...metricRow,
+        ...resolveLinkedExperimentsForRow(metricRow, experimentContext)
+      };
+      const dashboard = baseRow.entityType === 'kr' ? computeKRDashboard(store, baseRow.entityId) : null;
+      if (dashboard) {
+        row.contributions = dashboard.contributions || [];
+      } else {
+        row.contributions = [];
+      }
+      const hasPerformance = Number.isFinite(row.q2Achievement);
+      row.achievement = hasPerformance ? row.q2Achievement : null;
+      row.hasPerformance = hasPerformance;
+      row.targetType = row.entityType;
+      return row;
+    })
+    .filter(Boolean);
+
+  return applyExpandedDashboardFilters(rows, query);
+}
+
+function normalizeDashboardEntityType(entityType) {
+  if (entityType === 'kr') return 'kr';
+  if (entityType === 'sub_kr') return 'subKR';
+  if (entityType === 'initiative') return 'initiative';
+  if (entityType === 'objective') return 'objective';
+  return 'etc';
+}
+
+function labelForDashboardEntityType(entityType) {
+  if (entityType === 'kr') return 'KR';
+  if (entityType === 'sub_kr') return 'Sub-KR';
+  if (entityType === 'initiative') return 'Initiative';
+  if (entityType === 'objective') return 'Objective';
+  return String(entityType || '-');
+}
+
+function deriveAchievedRatePayload(rows) {
+  const total = rows.length;
+  if (total === 0) {
+    return { average: 0, updatedCount: 0, updatedRate: 0 };
+  }
+  const updatedRows = rows.filter((row) => Boolean(row.hasPerformance) && Number.isFinite(row.achievement));
+  const updatedCount = updatedRows.length;
+  const average =
+    updatedCount > 0 ? updatedRows.reduce((sum, row) => sum + row.achievement, 0) / updatedCount : 0;
+  return {
+    average: Number(average.toFixed(2)),
+    updatedCount,
+    updatedRate: Number(((updatedCount / total) * 100).toFixed(2))
+  };
+}
+
+function buildDashboardNotificationPreview(store, rows, maxItems = 6) {
+  const allNotifications = buildMonthlyNotificationItemsForMonth(store, null).map((item) => ({
+    ...item,
+    __status: normalizeNotificationStatus(item.status),
+    __division: normalizeNotificationText(item.division),
+    __owner: normalizeNotificationText(item.owner)
+  }));
+  const sorted = allNotifications.sort((a, b) => {
+    const statusCmp = String(a.__status || '').localeCompare(String(b.__status || ''));
+    if (statusCmp !== 0) return statusCmp;
+    return String(b.yearMonth || '').localeCompare(String(a.yearMonth || ''));
+  });
+
+  return sorted.slice(0, maxItems);
+}
+
+function buildExperimentWinRatePayload(store, rows) {
+  const experimentContext = buildExperimentLinkContext(store);
+  const experimentStatusCount = rows.reduce(
+    (acc, row) => {
+      const experimentIds = Array.isArray(row.linkedExperimentIds) ? row.linkedExperimentIds : [];
+      for (const experimentId of experimentIds) {
+        acc.uniqueIds.add(experimentId);
+      }
+      return acc;
+    },
+    { uniqueIds: new Set() }
+  );
+
+  let winnerExperimentCount = 0;
+  let totalExperimentCount = 0;
+  for (const experimentId of experimentStatusCount.uniqueIds) {
+    const experiment = experimentContext.experimentMap.get(experimentId);
+    if (!experiment) continue;
+    totalExperimentCount += 1;
+    if (normalizeExperimentResult(experiment.result, '위너 선정 전') === '실험군(B) 위너 선정') {
+      winnerExperimentCount += 1;
+    }
+  }
+  const winnerRate = totalExperimentCount === 0 ? 0 : Number(((winnerExperimentCount / totalExperimentCount) * 100).toFixed(2));
+  return {
+    totalExperimentCount,
+    winnerExperimentCount,
+    winnerRate
+  };
+}
+
+function buildOrganizationStatusRows(rows) {
+  const map = new Map();
+  const toSignal = (achievement) => {
+    if (!Number.isFinite(achievement)) return 'red';
+    return achievement >= 80 ? 'green' : achievement >= 60 ? 'yellow' : 'red';
+  };
+
+  rows.forEach((row) => {
+    const division = row.division || row.team || '미지정';
+    if (!map.has(division)) {
+      map.set(division, { name: division, total: 0, achievementSum: 0, completed: 0 });
+    }
+    const item = map.get(division);
+    item.total += 1;
+    item.achievementSum += Number.isFinite(row.achievement) ? row.achievement : 0;
+    if (Number.isFinite(row.achievement)) item.completed += 1;
+  });
+
+  return [...map.values()].map((item) => ({
+    name: item.name,
+    total: item.total,
+    completed: item.completed,
+    achievement: item.total > 0 ? Number((item.achievementSum / item.total).toFixed(2)) : 0,
+    status: toSignal(item.total > 0 ? item.achievementSum / item.total : 0),
+    trend: 0
+  })).sort((a, b) => b.achievement - a.achievement);
+}
+
+function buildTopPerformers(rows) {
+  const divisionMap = new Map();
+  rows.forEach((row) => {
+    const division = row.division || row.team || '미지정';
+    if (!divisionMap.has(division)) {
+      divisionMap.set(division, []);
+    }
+    divisionMap.get(division).push(row);
+  });
+
+  const ranking = [...divisionMap.entries()].map(([division, items]) => {
+    const withAchievement = items.filter((row) => Number.isFinite(row.achievement)).map((row) => row.achievement);
+    const avg = withAchievement.length > 0
+      ? withAchievement.reduce((sum, value) => sum + value, 0) / withAchievement.length
+      : 0;
+    const completionRate = items.length > 0 ? (items.filter((row) => Number.isFinite(row.achievement)).length / items.length) * 100 : 0;
+    const deltaRows = items.filter((row) => Number.isFinite(row.q1Achievement) && Number.isFinite(row.q2Achievement));
+    const delta = deltaRows.length > 0
+      ? deltaRows.reduce((sum, row) => sum + (row.q2Achievement - row.q1Achievement), 0) / deltaRows.length
+      : 0;
+    return {
+      organizationName: division,
+      avgAchievement: Number(avg.toFixed(2)),
+      completionRate: Number(completionRate.toFixed(2)),
+      monthDelta: Number(delta.toFixed(2)),
+      teamCount: new Set(items.map((row) => row.team || '')).size
+    };
+  });
+
+  return ranking.sort((a, b) => b.avgAchievement - a.avgAchievement).slice(0, 5);
+}
+
+function buildNotificationListForQuery(store, query = {}) {
+  const targetType = String(query.targetType || '').trim();
+  const targetId = String(query.targetId || '').trim();
+  let statusFilter = normalizeNotificationStatus(query.status || '');
+  const yearMonthParam = String(query.yearMonth || '').trim();
+  const limit = Number(query.limit || 0);
+
+  let selectedYearMonth = null;
+  if (yearMonthParam) {
+    const parsed = parseYearMonth(yearMonthParam);
+    if (!parsed) {
+      return { error: 'yearMonth is invalid', status: 400 };
+    }
+    selectedYearMonth = parsed;
+  }
+
+  let notifications = buildMonthlyNotificationItemsForMonth(store, selectedYearMonth);
+  if (targetType) {
+    notifications = notifications.filter((item) => item.targetType === targetType);
+  }
+  if (targetId) {
+    notifications = notifications.filter((item) => item.targetId === targetId);
+  }
+
+  const summary = {
+    total: notifications.length,
+    registered: notifications.filter((item) => normalizeNotificationStatus(item.status) === 'registered').length,
+    missing: notifications.filter((item) => normalizeNotificationStatus(item.status) === 'missing').length
+  };
+
+  if (statusFilter && !['registered', 'missing'].includes(statusFilter)) {
+    statusFilter = '';
+  }
+  if (statusFilter) {
+    notifications = notifications.filter((item) => normalizeNotificationStatus(item.status) === statusFilter);
+  }
+
+  const maxResults = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : notifications.length;
+
+  return {
+    notifications: notifications.slice(0, maxResults),
+    summary
+  };
+}
+
+function escapeCsv(value) {
+  const raw = value === null || value === undefined ? '' : String(value);
+  if (raw.includes('"') || raw.includes(',') || raw.includes('\n') || raw.includes('\r')) {
+    return `"${raw.replaceAll('"', '""')}"`;
+  }
+  return raw;
+}
+
+function toCsvLine(values) {
+  return values.map(escapeCsv).join(',');
+}
+
+function buildOKRTableRowsForCsv(rows) {
+  const maxCount = Math.max(
+    0,
+    ...rows.map((row) => Number.isFinite(Number((row.linkedExperimentCount))) ? Number(row.linkedExperimentCount) : 0)
+  );
+
+  const headers = [
+    'rowId',
+    '분류',
+    '도메인',
+    'AARRR',
+    '실',
+    '팀',
+    'Objective',
+    '항목명',
+    'Baseline',
+    'Q1목표',
+    'Q2목표',
+    '1월',
+    '2월',
+    '3월',
+    '4월',
+    '5월',
+    '6월',
+    'Q1달성률',
+    'Q2달성률',
+    '신호',
+    ...Array.from({ length: maxCount }, (_, idx) => `실험${idx + 1}_제목`),
+    ...Array.from({ length: maxCount }, (_, idx) => `실험${idx + 1}_시작일`),
+    ...Array.from({ length: maxCount }, (_, idx) => `실험${idx + 1}_종료일`),
+    ...Array.from({ length: maxCount }, (_, idx) => `실험${idx + 1}_결과`)
+  ];
+
+  const body = rows.map((row) => {
+    const linkedExperiments = Array.isArray(row.linkedExperiments) ? row.linkedExperiments : [];
+    const maxExperimentsForRow = linkedExperiments.length;
+    const expPadding = (linkedExperiments.length < maxCount)
+      ? Array.from({ length: maxCount - linkedExperiments.length }, () => ({ title: '-', startDate: '-', endDate: '-', result: '-' }))
+      : [];
+    const normalized = linkedExperiments.map((item) => ({
+      title: item.title || '-',
+      startDate: item.startDate || '-',
+      endDate: item.endDate || '-',
+      result: item.result || '-'
+    }));
+    const allExp = [...normalized, ...expPadding];
+
+    return [
+      row.rowId,
+      row.classification || row.effectiveClassification,
+      row.domain || '-',
+      row.aarrrTag || '-',
+      row.division || '-',
+      row.team || '-',
+      row.objectiveTitle || '-',
+      row.title || '-',
+      Number.isFinite(Number(row.baseline)) ? row.baseline : '',
+      Number.isFinite(Number(row.q1Target)) ? row.q1Target : '',
+      Number.isFinite(Number(row.q2Target)) ? row.q2Target : '',
+      row.monthlyValueMap?.[1] ?? '',
+      row.monthlyValueMap?.[2] ?? '',
+      row.monthlyValueMap?.[3] ?? '',
+      row.monthlyValueMap?.[4] ?? '',
+      row.monthlyValueMap?.[5] ?? '',
+      row.monthlyValueMap?.[6] ?? '',
+      Number.isFinite(Number(row.q1Achievement)) ? row.q1Achievement : '',
+      Number.isFinite(Number(row.q2Achievement)) ? row.q2Achievement : '',
+      row.signal || '',
+      ...allExp.flatMap((exp) => [exp.title, exp.startDate, exp.endDate, exp.result])
+    ];
+  });
+
+  return {
+    headers,
+    body,
+    maxCount
+  };
 }
 
 function objectiveTeamRows(store, presetCollections = getPresetCollections(store)) {
@@ -1309,6 +1640,9 @@ function latestQuarterValue(monthlyValueMap, quarter) {
   const order = quarter === 'q1' ? [3, 2, 1] : [6, 5, 4];
   for (const month of order) {
     const value = monthlyValueMap[month];
+    if (value === null || value === undefined || value === '') {
+      continue;
+    }
     if (Number.isFinite(Number(value))) {
       return Number(value);
     }
@@ -1619,17 +1953,14 @@ function resolveLinkedExperimentsForRow(row, context) {
   };
 
   if (row.entityType === 'objective') {
-    (context.krIdsByObjectiveId.get(row.entityId) || []).forEach((krId) => addKrExperiments(krId));
-    (context.initiativeIdsByObjectiveId.get(row.entityId) || []).forEach((initiativeId) => addInitiativeExperiments(initiativeId));
+    // Objective row does not inherit experiments from child KR/Initiative rows.
   } else if (row.entityType === 'kr') {
+    // KR row shows only experiments directly linked to KR.
     addKrExperiments(row.entityId);
-    (context.initiativeIdsByKrId.get(row.entityId) || []).forEach((initiativeId) => addInitiativeExperiments(initiativeId));
-    (context.subKrIdsByKrId.get(row.entityId) || []).forEach((subKrId) => {
-      (context.initiativeIdsBySubKrId.get(subKrId) || []).forEach((initiativeId) => addInitiativeExperiments(initiativeId));
-    });
   } else if (row.entityType === 'sub_kr') {
-    (context.initiativeIdsBySubKrId.get(row.entityId) || []).forEach((initiativeId) => addInitiativeExperiments(initiativeId));
+    // Sub-KR row has no direct experiment link type in current model.
   } else if (row.entityType === 'initiative') {
+    // Initiative row shows only experiments directly linked to Initiative.
     addInitiativeExperiments(row.entityId);
   }
 
@@ -1640,6 +1971,7 @@ function resolveLinkedExperimentsForRow(row, context) {
 
   const top = linkedExperiments[0] || null;
   return {
+    linkedExperimentIds: [...experimentIds],
     linkedExperimentCount: linkedExperiments.length,
     linkedExperimentTitle: top?.title || '',
     linkedExperimentStartDate: top?.startDate || '',
@@ -3315,37 +3647,35 @@ app.get('/api/dashboard/krs', (req, res) => {
 
 app.get('/api/dashboard/executive', (req, res) => {
   const store = loadStore();
-  const rows = getDashboardRows(store, req.query);
+  const rows = getExpandedDashboardRows(store, req.query);
   const experimentTotal = store.experiments.filter((item) => !item.deletedAt).length;
-  const krIdSet = new Set(rows.map((row) => row.krId));
-  const objectiveIdSet = new Set(rows.map((row) => row.objectiveId));
-  const subKrRows = (store.subKrs || []).filter((item) => !item.deletedAt && krIdSet.has(item.krId));
-  const subKrIdSet = new Set(subKrRows.map((item) => item.id));
-  const initiativeRows = (store.initiatives || []).filter((item) => {
-    if (item.deletedAt) return false;
-    if (item.krId && krIdSet.has(item.krId)) return true;
-    if (item.subKrId && subKrIdSet.has(item.subKrId)) return true;
-    if (item.objectiveId && objectiveIdSet.has(item.objectiveId)) return true;
-    return false;
-  });
-
+  const achievementPayload = deriveAchievedRatePayload(rows);
+  const signalSummary = {
+    green: rows.filter((row) => row.signal === 'green').length,
+    yellow: rows.filter((row) => row.signal === 'yellow').length,
+    red: rows.filter((row) => row.signal === 'red').length
+  };
   const summary = {
     objectiveCount: new Set(rows.map((row) => row.objectiveId)).size,
-    krCount: rows.length,
-    subKrCount: subKrIdSet.size,
-    initiativeCount: initiativeRows.length,
+    krCount: rows.filter((row) => row.entityType === 'kr').length,
+    subKrCount: rows.filter((row) => row.entityType === 'sub_kr').length,
+    initiativeCount: rows.filter((row) => row.entityType === 'initiative').length,
+    rowCount: rows.length,
     experimentCount: experimentTotal,
-    avgAchievement: rows.length > 0 ? Number((rows.reduce((sum, row) => sum + row.achievement, 0) / rows.length).toFixed(2)) : 0,
-    signal: {
-      green: rows.filter((row) => row.signal === 'green').length,
-      yellow: rows.filter((row) => row.signal === 'yellow').length,
-      red: rows.filter((row) => row.signal === 'red').length
-    }
+    avgAchievement: achievementPayload.average,
+    updateRate: achievementPayload.updatedRate,
+    updateCount: achievementPayload.updatedCount,
+    signal: signalSummary
   };
+  const organizationRows = buildOrganizationStatusRows(rows);
+  const topPerformers = buildTopPerformers(rows);
+  const experimentWinRate = buildExperimentWinRatePayload(store, rows);
+  const notificationPreview = buildDashboardNotificationPreview(store, rows, 6);
 
   const contributionMap = new Map();
   rows.forEach((row) => {
-    row.contributions.forEach((item) => {
+    const list = row.contributions || [];
+    list.forEach((item) => {
       if (!contributionMap.has(item.experimentId)) {
         contributionMap.set(item.experimentId, {
           experimentId: item.experimentId,
@@ -3367,23 +3697,47 @@ app.get('/api/dashboard/executive', (req, res) => {
 
   const riskKrs = rows
     .filter((row) => row.signal !== 'green')
-    .sort((a, b) => a.achievement - b.achievement)
+    .sort((a, b) => {
+      const aAchievement = Number.isFinite(a.achievement) ? a.achievement : 0;
+      const bAchievement = Number.isFinite(b.achievement) ? b.achievement : 0;
+      return aAchievement - bAchievement;
+    })
     .slice(0, 6)
     .map((row) => ({
-      krId: row.krId,
-      krTitle: row.krTitle,
+      rowId: row.rowId,
+      entityType: row.entityType,
+      typeLabel: labelForDashboardEntityType(row.entityType),
+      title: row.title,
+      objectiveTitle: row.objectiveTitle,
       division: row.division,
       domain: row.domain,
+      achievement: Number.isFinite(row.achievement) ? Number(row.achievement.toFixed(2)) : 0,
       signal: row.signal,
-      achievement: Number(row.achievement.toFixed(2))
+      parentKrId: row.krId,
+      team: row.team,
+      owner: row.owner,
+      krId: row.krId || null,
+      subKrId: row.subKrId || null,
+      initiativeId: row.entityType === 'initiative' ? row.entityId : null,
+      progressDelta: Number.isFinite(row.q1Achievement) && Number.isFinite(row.q2Achievement)
+        ? Number((row.q2Achievement - row.q1Achievement).toFixed(2))
+        : null
     }));
 
-  res.json({ summary, topContributors, riskKrs });
+  res.json({
+    summary,
+    topContributors,
+    riskKrs,
+    notifications: notificationPreview,
+    organizationRows,
+    topPerformers,
+    experimentWinRate
+  });
 });
 
 app.get('/api/dashboard/domains', (req, res) => {
   const store = loadStore();
-  const rows = getDashboardRows(store, req.query);
+  const rows = getExpandedDashboardRows(store, req.query);
   const grouped = new Map();
 
   rows.forEach((row) => {
@@ -3393,16 +3747,22 @@ app.get('/api/dashboard/domains', (req, res) => {
         domain,
         divisions: new Set(),
         objectiveIds: new Set(),
+        itemCount: 0,
         krCount: 0,
+        subKrCount: 0,
+        initiativeCount: 0,
         avgAchievement: 0,
         signal: { green: 0, yellow: 0, red: 0 }
       });
     }
 
     const bucket = grouped.get(domain);
+    bucket.itemCount += 1;
     bucket.divisions.add(row.division || '-');
     bucket.objectiveIds.add(row.objectiveId);
-    bucket.krCount += 1;
+    if (row.entityType === 'kr') bucket.krCount += 1;
+    if (row.entityType === 'sub_kr') bucket.subKrCount += 1;
+    if (row.entityType === 'initiative') bucket.initiativeCount += 1;
     bucket.avgAchievement += row.achievement;
     bucket.signal[row.signal] += 1;
   });
@@ -3413,8 +3773,11 @@ app.get('/api/dashboard/domains', (req, res) => {
       divisionCount: bucket.divisions.size,
       divisions: [...bucket.divisions].sort((a, b) => a.localeCompare(b)),
       objectiveCount: bucket.objectiveIds.size,
+      rowCount: bucket.itemCount,
       krCount: bucket.krCount,
-      avgAchievement: bucket.krCount > 0 ? Number((bucket.avgAchievement / bucket.krCount).toFixed(2)) : 0,
+      subKrCount: bucket.subKrCount,
+      initiativeCount: bucket.initiativeCount,
+      avgAchievement: bucket.itemCount > 0 ? Number((bucket.avgAchievement / bucket.itemCount).toFixed(2)) : 0,
       signal: bucket.signal
     }))
     .sort((a, b) => a.domain.localeCompare(b.domain));
@@ -3424,21 +3787,29 @@ app.get('/api/dashboard/domains', (req, res) => {
 
 app.get('/api/dashboard/review', (req, res) => {
   const store = loadStore();
-  const rows = getDashboardRows(store, req.query);
+  const rows = getExpandedDashboardRows(store, req.query);
 
   const reviewItems = rows
     .filter((row) => row.signal !== 'green')
-    .sort((a, b) => a.achievement - b.achievement)
+    .sort((a, b) => (Number.isFinite(a.achievement) ? a.achievement : 0) - (Number.isFinite(b.achievement) ? b.achievement : 0))
     .slice(0, 10)
     .map((row) => ({
-      krId: row.krId,
-      krTitle: row.krTitle,
+      rowId: row.rowId,
+      entityType: row.entityType,
+      typeLabel: labelForDashboardEntityType(row.entityType),
+      title: row.title,
       objectiveTitle: row.objectiveTitle,
       division: row.division,
       domain: row.domain,
-      achievement: Number(row.achievement.toFixed(2)),
+      krId: row.krId || null,
+      subKrId: row.subKrId || null,
+      initiativeId: row.entityType === 'initiative' ? row.entityId : null,
+      achievement: Number.isFinite(row.achievement) ? Number(row.achievement.toFixed(2)) : 0,
       signal: row.signal,
-      topContributor: row.contributions[0] || null
+      owner: row.owner || '-',
+      topContributor: row.contributions[0] || null,
+      linkedExperimentCount: Number(row.linkedExperimentCount || 0),
+      linkedExperimentTitle: row.linkedExperimentTitle || '-'
     }));
 
   const recentAudit = [...store.auditLogs]
@@ -3469,6 +3840,36 @@ app.get('/api/dashboard/okr-table', (req, res) => {
   const { rows, pagination } = paginateRows(sorted, req.query);
   const summary = buildTableSummary(filtered);
   res.json({ rows, pagination, summary });
+});
+
+app.get('/api/dashboard/okr-table/export.csv', (req, res) => {
+  const store = loadStore();
+  const allRows = buildOKRTableRows(store);
+  const filtered = filterOKRTableRows(allRows, req.query);
+  const sorted = sortOKRTableRows(filtered, {
+    ...req.query,
+    sortBy: req.query.sortBy || 'hierarchy',
+    sortOrder: req.query.sortOrder || 'asc'
+  });
+
+  const csvPayload = buildOKRTableRowsForCsv(sorted);
+  const csvRows = [toCsvLine(csvPayload.headers)];
+  csvPayload.body.forEach((row) => {
+    csvRows.push(toCsvLine(row));
+  });
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="okr-total-table.csv"');
+  res.status(200).send(`\uFEFF${csvRows.join('\n')}`);
+});
+
+app.get('/api/dashboard/notifications', (req, res) => {
+  const store = loadStore();
+  const result = buildNotificationListForQuery(store, req.query);
+  if (result.error) {
+    return fail(res, result.status, result.error);
+  }
+  res.json(result);
 });
 
 app.patch('/api/dashboard/okr-table/:rowId', async (req, res) => {
@@ -3872,51 +4273,18 @@ app.get('/api/admin/roles', (_req, res) => {
 
 app.get('/api/admin/notifications', (req, res) => {
   const store = loadStore();
-  const targetType = String(req.query.targetType || '').trim();
-  const targetId = String(req.query.targetId || '').trim();
-  let statusFilter = normalizeNotificationStatus(req.query.status || '');
-  const yearMonthParam = String(req.query.yearMonth || '').trim();
-  const limit = Number(req.query.limit || 0);
-
-  let selectedYearMonth = null;
-  if (yearMonthParam) {
-    const parsed = parseYearMonth(yearMonthParam);
-    if (!parsed) return fail(res, 400, 'yearMonth is invalid');
-    selectedYearMonth = parsed;
+  const result = buildNotificationListForQuery(store, req.query);
+  if (result.error) {
+    return fail(res, result.status, result.error);
   }
 
-  let notifications = buildMonthlyNotificationItemsForMonth(store, selectedYearMonth);
-  if (targetType) {
-    notifications = notifications.filter((item) => item.targetType === targetType);
-  }
-  if (targetId) {
-    notifications = notifications.filter((item) => item.targetId === targetId);
-  }
-  if (statusFilter && !['registered', 'missing'].includes(statusFilter)) {
-    statusFilter = '';
-  }
-
-  const summary = {
-    total: notifications.length,
-    registered: notifications.filter((item) => normalizeNotificationStatus(item.status) === 'registered').length,
-    missing: notifications.filter((item) => normalizeNotificationStatus(item.status) === 'missing').length
-  };
-
-  if (statusFilter) {
-    notifications = notifications.filter((item) => normalizeNotificationStatus(item.status) === statusFilter);
-  }
-
-  const maxResults = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : notifications.length;
-
-  res.json({
-    notifications: notifications.slice(0, maxResults),
-    summary
-  });
+  res.json(result);
 });
 
 app.get('/api/admin/presets', (_req, res) => {
   const store = loadStore();
   const presets = getPresetCollections(store);
+  if (!ensureRequiredPresets(res, presets)) return;
   res.json({
     ...presets,
     meta: PRESET_FIELD_META
@@ -4126,12 +4494,16 @@ app.get('/api/admin/org-master', (_req, res) => {
 
 app.get('/api/admin/taxonomy', (_req, res) => {
   const store = loadStore();
-  res.json(buildTaxonomyPayload(store));
+  const taxonomy = buildTaxonomyPayload(store);
+  if (!ensureRequiredPresets(res, taxonomy)) return;
+  res.json(taxonomy);
 });
 
 app.get('/api/master-options', (_req, res) => {
   const store = loadStore();
-  res.json(buildTaxonomyPayload(store));
+  const taxonomy = buildTaxonomyPayload(store);
+  if (!ensureRequiredPresets(res, taxonomy)) return;
+  res.json(taxonomy);
 });
 
 app.get('/api/audit-logs', (req, res) => {
@@ -4261,10 +4633,8 @@ app.get('*', (_req, res) => {
 });
 
 const bootstrapReady = bootstrapStore().catch((error) => {
-  console.error('[bootstrap] async init failed, continue with fallback store:', error.message);
-  if (!storeCache) {
-    storeCache = baseStore();
-  }
+  console.error('[bootstrap] async init failed:', error.message);
+  throw error;
 });
 
 if (require.main === module) {
@@ -4272,8 +4642,7 @@ if (require.main === module) {
     .then(() => {
       app.listen(port, () => {
         console.log(`OKR dashboard prototype server listening on port ${port}`);
-        console.log(`Data file: ${dataFile}`);
-        console.log(`Supabase sync: ${isSupabaseEnabled() ? 'enabled' : 'disabled'}`);
+        console.log('Supabase sync: enabled');
       });
     })
     .catch((error) => {
