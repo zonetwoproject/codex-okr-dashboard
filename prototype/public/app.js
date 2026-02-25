@@ -2043,7 +2043,7 @@ function setPageHeader() {
   }
   el.pageTitle.textContent = pageTitle;
   el.pageDesc.textContent = meta.desc;
-  document.title = `${meta.title} | 배민 인사이트 어드민`;
+  document.title = `${meta.title} | 배민 인사이트 포털`;
 }
 
 async function onTopbarCreateObjective() {
